@@ -1,0 +1,182 @@
+html, body {
+  text-rendering: optimizeLegibility !important;
+  -webkit-font-smoothing: antialiased !important;
+  line-height: 1.4;
+  width: 99.99vw;
+  height: 100vh;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  font-family: 'Lato', sans-serif;
+  font-style: normal;
+  font-weight: 400;
+  overflow: hidden;
+}
+#container {
+  position: relative;
+  overflow: hidden;
+  z-index: 0;
+}
+#map {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1536px;
+  height: 1024px;
+  cursor: grab;
+}
+#points {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  z-index: 100;
+}
+#outputCanvas,
+#editCanvas,
+#labelCanvas {
+  opacity: 0.5;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+.tile,
+.masterTile {
+  pointer-events: none;
+  position: absolute;
+  width: 256px;
+  height: 256px;
+}
+#info {
+  position: fixed;
+  top: 1024px;
+  left: 0;
+  padding: 10px;
+  background: #000;
+  color: #fff;
+  width: 1516px;
+  height: 18px;
+  z-index: 1000;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 16px;
+}
+.credit {
+  position: fixed;
+  top: 1022px;
+  left: 1300px;
+  height: 40px;
+  color: #fff;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  z-index: 1000;
+}
+.credit a {
+  text-decoration: none;
+  color: #ddd;
+}
+@media only screen and (max-height: 1042px) {
+  #info, .credit {
+    bottom: 0;
+    top: auto;
+  }
+}
+button {
+  width: 120px;
+  height: 30px;
+  padding-bottom: 4px;
+}
+#mapMCs {
+  position: fixed;
+  top: 10px;
+  left: 1540px;
+}
+#dispWIP {
+  position: fixed;
+  top: 10px;
+  left: 1790px;
+}
+#runAlgo {
+  position: fixed;
+  top: 10px;
+  left: 1665px;
+}
+#downloadZip {
+  position: fixed;
+  top: 380px;
+  left: 1540px;
+}
+#generateMaster {
+  position: fixed;
+  top: 450px;
+  left: 1540px;
+}
+#mcControls {
+  position: fixed;
+  top: 50px;
+  left: 1540px;
+  line-height: 34px;
+}
+.slider {
+  height: 27px;
+  transform: translate(0, 9px);
+}
+/* Toggle switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 54px;
+  height: 26px;
+  transform: translate(0, 6px);
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  -webkit-transition: 0.4s;
+          transition: 0.4s;
+}
+
+.toggle:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  -webkit-transition: 0.4s;
+          transition: 0.4s;
+}
+input:checked + .toggle {background-color: #2196F3;}
+input:focus + .slitoggleder {box-shadow: 0 0 1px #2196F3;}
+input:checked + .toggle:before {
+  -webkit-transform: translateX(26px);
+      -ms-transform: translateX(26px);
+          transform: translateX(26px);
+}
+.toggle.round {border-radius: 34px;}
+.toggle.round:before {border-radius: 50%;}
+#colorPot {
+  height: 26px;
+  width: 75px;
+  display: block;
+  background: white;
+  transform: translate(0, 8px);
+}
+#hiddenCanvas {
+  visibility: hidden;
+  height: 256px;
+  width: 256px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+}
