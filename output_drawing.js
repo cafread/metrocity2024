@@ -1,45 +1,3 @@
-function setOpacity (sliderValue, elementIds=[]) {
-  for (let elid of elementIds) {
-    if (document.getElementById(elid) !== null) document.getElementById(elid).style.opacity = sliderValue / 100;
-  }
-}
-function dispWIP () {
-  // Get top left
-  let [x, y] = topLeftTile ();
-  // Move to that tile
-  moveToTile(x, y);
-  // Check to see if we have a work in progress tile set to work with for this area
-  let wipTileCount = Object.keys(localStorage).length;
-  let wipOnscreenCount = countOnscreenWipTiles(x, y);
-  let masterOnscreenCount = countOnscreenMasterTiles();
-  if (wipTileCount === 0 && masterOnscreenCount === 0) {
-    alert("No tiles found");
-  } else if (wipOnscreenCount === 0 && masterOnscreenCount === 0) {
-    alert("No tiles found for this area");
-  } else if (wipOnscreenCount === 0 && masterOnscreenCount > 0) {
-    // Copy master to outputCanvas if master has data but localStorage does not
-    dataToTile(x, y, "Master");
-    // Fade master
-    d3.selectAll(".masterTile").style("opacity", 0);
-    document.getElementById("freezeControl").style.visibility = "visible";
-  } else { // Find WIP tile data and draw it for x, y
-    dataToTile(x, y, "localStorage");
-    // Fade master
-    d3.selectAll(".masterTile").style("opacity", 0);
-    document.getElementById("freezeControl").style.visibility = "visible";
-  }
-}
-function topLeftTile () {
-  //let tileCoords = d3.select("#container").selectAll(".tile")[0][0].map(d => d3.select(d).attr("src").substr(44, 15).replace(".png", "").split("/"));
-  let tileCoords = d3.select("#container").selectAll(".tile")[0].map(d => d.src.substr(52).replace('.png', '').split("/").map(Number));
-  let tileY = d3.min(tileCoords, d => d[1]);
-  // When crossing the international date line, the 'x' tile property resets to zero, but we want the min of the 'high' x values
-  let minTileX = d3.min(tileCoords, d => d[0]);
-  let maxTileX = d3.max(tileCoords, d => d[0]);
-  let tileX = minTileX;
-  if(minTileX === 0 && maxTileX > 120) tileX = d3.min(tileCoords, d => d[0] > 120 ? d[0] : null);
-  return [tileX, tileY];
-}
 function dataToTile (x, y, source="localStorage") {
   // Given the upper left x & y tile details, pull from localStorage all saved tiles
   let tileX = 0;
@@ -221,15 +179,4 @@ function initArt (canvas) {
   canvas.onmousemove = function (e) {if (editState.busyDrawing) addClick(e.pageX - this.offsetLeft, e.pageY - this.offsetTop, true);}
   canvas.onmouseup = () => transferArt();
   canvas.onmouseleave = () => editState.busyDrawing = false;
-}
-function rgbaToId ([r, g, b, a], nolog=false) {
-  if ([r, g, b].join("") === "000") return 0;
-  let code = "rgba(" + r + "," + g + "," + b + ",1)";
-  if (colorToId[code]) return colorToId[code];
-  for (let per of compressionDebug) {
-    code = "rgba(" + (r + per.r) + "," + (g + per.g) + "," + (b + per.b) + ",1)";
-    if (colorToId[code]) return colorToId[code];
-  }
-  if (!nolog) console.log("Sample not matched", [r, g, b]);
-  return 0;
 }

@@ -1,5 +1,5 @@
-# metrocity2020
-Demo: https://cafread.github.io/metrocity2024/
+# metrocity2024
+Demo: https://cafread.github.io/metrocity2020/canvas_cities.html
 
 This is one piece of location modelling for business travel, using quadtrees, tile generation, string compression, canvas drawing, leaflet, d3 and a whole lot of optimisations to make a neat little front end for editing the 'where' that can be displayed on geolocated data.
 
