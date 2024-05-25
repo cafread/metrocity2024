@@ -64,9 +64,15 @@ function runAgglomeration() {
       let [x, y] = projection([+d.longitude, +d.latitude]);
       let isVital = vitalCities[d.geonameid] !== undefined || +d.population > 3000000;
       let isCandidate = isVital || cityData.some(c => c.i === +d.geonameid);
-      let countryCode = d["country code"]
-      let state = countryCode === "US" ? ", (" + d["admin1 code"] + ")" : ""; // Other countries have states, but need decoding
-      let displayName = d.asciiname + state + ", " + countryCode;
+      let thisCity = cityData.find(c => c.i === +d.geonameid);
+      let displayName = '';
+      let countryCode = d["country code"];
+      if (thisCity) {
+        displayName = thisCity.n;
+      } else {
+        let state = countryCode === "US" ? ", (" + d["admin1 code"] + ")" : ""; // Other countries have states, but need decoding
+        displayName = d.asciiname + state + ", " + countryCode;
+      }
       let color = idToColor[d.geonameid] || "rgba(0,0,0,1)";
       agglomData[d.geonameid] = new City(+d.geonameid, x, y, +d.latitude, +d.longitude, +d.population, d.asciiname, displayName, countryCode, color, isVital, isCandidate, []);
       let pt = new Point(x, y, {id: +d.geonameid, pop: +d.population, name: displayName, basicName: d.asciiname, countryCode: countryCode, lat: +d.latitude, lon: +d.longitude, x: x, y: y});
