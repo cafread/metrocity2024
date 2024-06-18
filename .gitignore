@@ -10,3 +10,6 @@ res/htl_to_mc_inp.json
 res/htl_to_mc_inp_2.json
 google_api_test_from_placeid.html
 res/mc_info_lkp.txt
+res/to_mc.csv
+res/to_mc_2.csv
+res/to_mc_apt.csv
