@@ -34,7 +34,7 @@
                 .scale(1 << 17)
                 .translate([1300000, 1250000]);
             let stateSvg = d3.select("#stateSvg");
-            d3.json("res/gadm/states.json", (err, dat) => {
+            d3.json("https://cafread.github.io/metrocity2024/res/gadm/states.json", (err, dat) => {
                 if (err) throw err;
                 stateJson = dat;
                 stateRender();
@@ -55,7 +55,7 @@
                 setTimeout(makeTestSuite, 200);
             }
             function makeTestSuite () {
-                d3.csv("res/gadm/state_test.csv", (err, dat) => {
+                d3.csv("https://cafread.github.io/metrocity2024/res/gadm/state_test.csv", (err, dat) => {
                     if (err) throw err;
                     readStates(dat);
                 });
