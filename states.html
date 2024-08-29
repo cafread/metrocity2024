@@ -122,8 +122,11 @@
                         })
                         .then(json => {
                             const stateCode = json.address ? json.address["ISO3166-2-lvl4"] : "";
-                            testResult[pos].ISO_1 = isoMap[stateCode] ?? stateCode;
+                            const res = isoMap[stateCode] ?? stateCode;
+                            console.log({json, res});
+                            return res;
                         })
+                        .finally(res => testResult[pos].ISO_1 = res)
                         .catch(error => console.error(error.message));
                 }
             }
