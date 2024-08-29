@@ -4,6 +4,8 @@
     <head>
         <script type="text/javascript" src="https://d3js.org/d3.v3.min.js"></script>
         <meta charset="utf-8">
+        <link href="res/favicon.ico" rel="icon" type="image/x-icon" />
+        <link href='https://fonts.googleapis.com/css?family=Lato:300,400,600,700' rel='stylesheet' type='text/css' />
         <style type="text/css">
             html, body {
                 width: 100%;
@@ -34,7 +36,7 @@
                 .scale(1 << 17)
                 .translate([1300000, 1250000]);
             let stateSvg = d3.select("#stateSvg");
-            d3.json("https://cafread.github.io/metrocity2024/res/gadm/states.json", (err, dat) => {
+            d3.json("res/gadm/states.json", (err, dat) => {
                 if (err) throw err;
                 stateJson = dat;
                 stateRender();
@@ -55,7 +57,7 @@
                 setTimeout(makeTestSuite, 200);
             }
             function makeTestSuite () {
-                d3.csv("https://cafread.github.io/metrocity2024/res/gadm/state_test.csv", (err, dat) => {
+                d3.csv("res/gadm/state_test.csv", (err, dat) => {
                     if (err) throw err;
                     readStates(dat);
                 });
@@ -77,57 +79,52 @@
                                 document.elementFromPoint(100, 150)?.getAttribute("ISO_1")];
                     // Find the first valid value
                     let ISO_1 = isos.find(d => !!d) ?? "";
-                    // Check for boundaries
+                    // Check for boundaries and use API to verify the results
                     let is_eq = isos.find(d => !!d && d !== ISO_1) !== undefined;
-                    // If is_eq is false, verify using another API to confirm the result
                     // Apply lookups, default to empty string
                     loc.ISO_1 = isoMap[ISO_1] ?? ISO_1;
                     // Log failures
-                    if (loc.ISO_1 == "") { // || !is_eq
+                    if (loc.ISO_1 == "" || !is_eq) { // 
                         misses.push(loc); // Object
-                        APIInput.push({pos: pos, lat: +loc.longitude, lon: +loc.latitude});
+                        APIInput.push({pos: pos, lat: +loc.latitude, lon: +loc.longitude});
                     }
                     return loc;
                 });
-                console.log("Misses: " + misses.length + " of " + testResult.length, misses);
+                console.log("Misses & edge cases: " + misses.length + " of " + testResult.length, misses);
+                console.log("Begin API validation of " + APIInput.length + " edge cases & misses");
                 locationAPI(APIInput);
                 return testResult;
             }
             async function locationAPI (points) {
-                // point is {pos, lat, lon}, pos is position in testResult
-                // Would prefer to make this functional
+                const ak = ("<5<ij;7j57<h9ghhf75>i>g;g=9f;=f:").split``.map(c => String.fromCharCode(c.charCodeAt() - 5)).join``;
                 let rem = points.length;
-                // Need to rate limit this to less than one per second
-                for (let i = 0; i < points.length; i++) {
-                    const pt = points[i];
-                    const url = "https://nominatim.openstreetmap.org/reverse?format=json&lat=" + pt.lat + "&lon=" + pt.lon + "&zoom=10";
-                    setTimeout(callAPI(url, pt.pos), i * 1500);
-                }
-                function callAPI (url, pos) {
-                    console.log(url);
-                    const headers = {
-                        method: "GET",
-                        referrer: "https://cafread.github.io/metrocity2024/states.html",
-                        referrerPolicy: "origin",
-                        mode: "cors",
-                        origin: "",
-                        cache: "default"
-                    }; 
-                    fetch(url, headers)
-                        .then(response => {
-                            rem--;
-                            if (rem === 0) console.log("API calls completed");
-                            if (response.ok) return response.json();
-                            throw Error(response.status);
-                        })
-                        .then(json => {
-                            const stateCode = json.address ? json.address["ISO3166-2-lvl4"] : "";
-                            const res = isoMap[stateCode] ?? stateCode;
-                            console.log({json, res});
-                            return res;
-                        })
-                        .finally(res => testResult[pos].ISO_1 = res)
-                        .catch(error => console.error(error.message));
+                const urls = Object.fromEntries(points.map(p => ["https://api.opencagedata.com/geocode/v1/json?key=" + ak + "&q=" + encodeURIComponent(p.lat + "," + p.lon) + "&pretty=0&no_annotations=1", p.pos]));
+                for (let url of Object.keys(urls)) {
+                    const request = new XMLHttpRequest();
+                    request.open('GET', url, true);
+                    request.onload = function() {
+                        rem--;
+                        console.log(rem + " remain to check");
+                        if (rem === 0) console.log("API Requests complete");
+                        if (request.status === 200) {
+                            const data = JSON.parse(request.responseText);
+                            const stateCode = data.results[0].components["ISO_3166-2"] ? data.results[0].components["ISO_3166-2"][0] :
+                                              data.results[0].components["ISO_3166-1_alpha-2"] + "-" + data.results[0].components.state_code;
+                            const pos = urls[request.responseURL];
+                            testResult[pos].ISO_1 = isoMap[stateCode] ?? stateCode;
+                        } else if (request.status <= 500) {
+                            const data = JSON.parse(request.responseText);
+                            console.error('Error: ' + data.status.message);
+                        } else {
+                            console.log("Server error");
+                        }
+                    };
+                    request.onerror = () => {
+                        console.log("Unable to connect to server");
+                        rem--;
+                        if (rem === 0) console.log("API Requests complete");
+                    };
+                    request.send();
                 }
             }
             let isoMap = {
