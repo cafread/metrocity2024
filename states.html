@@ -1,0 +1,182 @@
+
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <script type="text/javascript" src="https://d3js.org/d3.v3.min.js"></script>
+        <meta charset="utf-8">
+        <style type="text/css">
+            html, body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                border: 0;
+                padding: 0;
+                font-family: "Helvetica Neue", Helvetica, sans-serif;
+                font-size: 14px;
+                color: #333;
+            }
+            #stateSvg {
+                width: 3000000px;
+                height: 2000000px;
+            }
+            path:hover {
+	            fill-opacity: 0.7;
+            }
+        </style>
+    </head>
+    <body>
+        <svg width="3000000" height="2000000" id="stateSvg"></svg>
+        <script type="text/javascript">
+            let stateJson = {};
+            // Mercator appears to give the most stable results
+            // Significant arcs do appear where points are far apart (CA-US border and within the continental US)
+            const stateProjection = d3.geo.mercator()
+                .scale(1 << 17)
+                .translate([1300000, 1250000]);
+            let stateSvg = d3.select("#stateSvg");
+            d3.json("res/gadm/states.json", (err, dat) => {
+                if (err) throw err;
+                stateJson = dat;
+                stateRender();
+            });
+            let statePath = d3.geo.path()
+                .projection(stateProjection)
+            function stateRender() {
+                stateSvg.selectAll("path")
+                    .data(stateJson.features)
+                    .enter()
+                        .append("path")
+                        .attr("d", statePath)
+                        .attr("ISO_1", d => d.properties.ISO_1)
+                        .style("stroke", "#aaa")
+                        .style("stroke-width", "0.01")
+                        .style("fill", "#0000FF")
+                        .on("mouseover", d => console.log(d.properties.ISO_1));
+                setTimeout(makeTestSuite, 200);
+            }
+            function makeTestSuite () {
+                d3.csv("res/gadm/state_test.csv", (err, dat) => {
+                    if (err) throw err;
+                    readStates(dat);
+                });
+            }
+            let testResult;
+            function readStates (dat) {
+                let misses = [];
+                let APIInput = [];
+                testResult = dat.map((loc, pos) => {
+                    let testP = stateProjection([+loc.longitude, +loc.latitude]);
+                    // Using window is massively faster than reprojection
+                    // Looks hacky, but the result is the same
+                    window.scrollTo(testP[0] - 100, testP[1] - 100);
+                    // Grab central and run basic boundary detection
+                    let isos = [document.elementFromPoint(100, 100)?.getAttribute("ISO_1"),
+                                document.elementFromPoint( 50, 100)?.getAttribute("ISO_1"),
+                                document.elementFromPoint(100,  50)?.getAttribute("ISO_1"),
+                                document.elementFromPoint(150, 100)?.getAttribute("ISO_1"),
+                                document.elementFromPoint(100, 150)?.getAttribute("ISO_1")];
+                    // Find the first valid value
+                    let ISO_1 = isos.find(d => !!d) ?? "";
+                    // Check for boundaries
+                    let is_eq = isos.find(d => !!d && d !== ISO_1) !== undefined;
+                    // If is_eq is false, verify using another API to confirm the result
+                    // Apply lookups, default to empty string
+                    loc.ISO_1 = isoMap[ISO_1] ?? ISO_1;
+                    // Log failures
+                    if (loc.ISO_1 == "") { // || !is_eq
+                        misses.push(loc); // Object
+                        APIInput.push({pos: pos, lat: +loc.longitude, lon: +loc.latitude});
+                    }
+                    return loc;
+                });
+                console.log("Misses: " + misses.length + " of " + testResult.length, misses);
+                locationAPI(APIInput);
+                return testResult;
+            }
+            async function locationAPI (points) {
+                // point is {pos, lat, lon}, pos is position in testResult
+                // Would prefer to make this functional
+                let rem = points.length;
+                // Need to rate limit this to less than one per second
+                for (let i = 0; i < points.length; i++) {
+                    const pt = points[i];
+                    const url = "https://nominatim.openstreetmap.org/reverse?format=json&lat=" + pt.lat + "&lon=" + pt.lon + "&zoom=10";
+                    setTimeout(callAPI(url, pt.pos), i * 1500);
+                }
+                function callAPI (url, pos) {
+                    console.log(url);
+                    const headers = {
+                        method: "GET",
+                        referrer: "https://www.predictx.com",
+                        referrerPolicy: "origin",
+                        mode: "cors",
+                        origin: "",
+                        cache: "default"
+                    }; 
+                    fetch(url, headers)
+                        .then(response => {
+                            rem--;
+                            if (rem === 0) console.log("API calls completed");
+                            if (response.ok) return response.json();
+                            throw Error(response.status);
+                        })
+                        .then(json => {
+                            const stateCode = json.address ? json.address["ISO3166-2-lvl4"] : "";
+                            testResult[pos].ISO_1 = isoMap[stateCode] ?? stateCode;
+                        })
+                        .catch(error => console.error(error.message));
+                }
+            }
+            let isoMap = {
+                "JP-01":"JP-HKD",
+                "JP-02":"JP-AMR",
+                "JP-03":"JP-IWT",
+                "JP-04":"JP-MYG",
+                "JP-05":"JP-AKT",
+                "JP-06":"JP-YMT",
+                "JP-07":"JP-FKS",
+                "JP-08":"JP-IBR",
+                "JP-09":"JP-TCG",
+                "JP-10":"JP-GUM",
+                "JP-11":"JP-STM",
+                "JP-12":"JP-CHB",
+                "JP-13":"JP-TOK",
+                "JP-14":"JP-KNG",
+                "JP-15":"JP-NGT",
+                "JP-16":"JP-TYM",
+                "JP-17":"JP-ISK",
+                "JP-18":"JP-FUK",
+                "JP-19":"JP-YMN",
+                "JP-20":"JP-NGN",
+                "JP-21":"JP-GIF",
+                "JP-22":"JP-SZO",
+                "JP-23":"JP-ACH",
+                "JP-24":"JP-MIE",
+                "JP-25":"JP-SHG",
+                "JP-26":"JP-KYT",
+                "JP-27":"JP-OSK",
+                "JP-28":"JP-HYG",
+                "JP-29":"JP-NAR",
+                "JP-30":"JP-WKY",
+                "JP-31":"JP-TGR",
+                "JP-32":"JP-SMN",
+                "JP-33":"JP-OKY",
+                "JP-34":"JP-HRS",
+                "JP-35":"JP-YMG",
+                "JP-36":"JP-TKS",
+                "JP-37":"JP-KGW",
+                "JP-38":"JP-EHM",
+                "JP-39":"JP-KOC",
+                "JP-40":"JP-FKK",
+                "JP-41":"JP-SAG",
+                "JP-42":"JP-NGS",
+                "JP-43":"JP-KMM",
+                "JP-44":"JP-OIT",
+                "JP-45":"JP-MYZ",
+                "JP-46":"JP-KGS",
+                "JP-47":"JP-OKN",
+                "NA":""
+            }
+        </script>
+    </body>
+</html>
