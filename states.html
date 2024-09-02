@@ -28,7 +28,10 @@
     </head>
     <body>
         <svg width="3000000" height="2000000" id="stateSvg"></svg>
+        <script type="text/javascript" src="res/stateCorrs.js"></script>
         <script type="text/javascript">
+            // Country read here
+            
             let stateJson = {};
             // Mercator appears to give the most stable results
             // Significant arcs do appear where points are far apart (CA-US border and within the continental US)
@@ -54,64 +57,119 @@
                         .style("stroke-width", "0.01")
                         .style("fill", "#0000FF")
                         .on("mouseover", d => console.log(d.properties.ISO_1));
-                setTimeout(makeTestSuite, 200);
+                setTimeout(makeStateTestSuite, 200);
             }
-            function makeTestSuite () {
+            function makeStateTestSuite () {
                 d3.csv("res/gadm/state_test.csv", (err, dat) => {
                     if (err) throw err;
-                    readStates(dat);
+                    readStates(dat, true);
                 });
             }
-            let testResult;
-            function readStates (dat) {
+            let stateTestResult;
+            function readStates (dat, checkBoundaries=false) {
                 let misses = [];
                 let APIInput = [];
-                testResult = dat.map((loc, pos) => {
+                stateTestResult = dat.map((loc, pos) => {
+                    // Use cache where possible
+                    let cacheKey = +loc.latitude + "%2C" + +loc.longitude;
+                    if (stateCorrs.hasOwnProperty(cacheKey)) {
+                        loc.ISO_1 = stateCorrs[cacheKey];
+                        localStorage.setItem(cacheKey, stateCorrs[cacheKey]);
+                        return loc;
+                    } else if (localStorage.getItem(cacheKey)) {
+                        loc.ISO_1 = localStorage.getItem(cacheKey);
+                        return loc;
+                    }
                     let testP = stateProjection([+loc.longitude, +loc.latitude]);
                     // Using window is massively faster than reprojection
                     // Looks hacky, but the result is the same
                     window.scrollTo(testP[0] - 100, testP[1] - 100);
-                    // Grab central and run basic boundary detection
-                    let isos = [document.elementFromPoint(100, 100)?.getAttribute("ISO_1"),
+                    let ISO_1 = "";
+                    let is_eq = true;
+                    if (checkBoundaries) {
+                        // Basic boundary detection - increases runtime and memory usage
+                        const isos = [
+                            document.elementFromPoint(100, 100)?.getAttribute("ISO_1"),
+                            document.elementFromPoint( 50, 100)?.getAttribute("ISO_1"),
+                            document.elementFromPoint(100,  50)?.getAttribute("ISO_1"),
+                            document.elementFromPoint(150, 100)?.getAttribute("ISO_1"),
+                            document.elementFromPoint(100, 150)?.getAttribute("ISO_1")
+                        ];
+                        // Find the first valid value
+                        ISO_1 = isos.find(d => !!d) ?? "";
+                        // Check for boundaries and use API to verify the results
+                        is_eq = isos.find(d => !!d && d !== ISO_1) == undefined && ISO_1 !== null;
+                    } else {
+                        ISO_1 = document.elementFromPoint(100, 100)?.getAttribute("ISO_1") ?? "";
+                        if (ISO_1 === "") { // Check for nearby
+                            const isos = [
                                 document.elementFromPoint( 50, 100)?.getAttribute("ISO_1"),
                                 document.elementFromPoint(100,  50)?.getAttribute("ISO_1"),
                                 document.elementFromPoint(150, 100)?.getAttribute("ISO_1"),
-                                document.elementFromPoint(100, 150)?.getAttribute("ISO_1")];
-                    // Find the first valid value
-                    let ISO_1 = isos.find(d => !!d) ?? "";
-                    // Check for boundaries and use API to verify the results
-                    let is_eq = isos.find(d => !!d && d !== ISO_1) !== undefined;
-                    // Apply lookups, default to empty string
-                    loc.ISO_1 = isoMap[ISO_1] ?? ISO_1;
-                    // Log failures
-                    if (loc.ISO_1 == "" || !is_eq) { // 
-                        misses.push(loc); // Object
+                                document.elementFromPoint(100, 150)?.getAttribute("ISO_1")
+                            ];
+                            ISO_1 = isos.find(d => !!d) ?? "";
+                            is_eq = isos.find(d => !!d && d !== ISO_1) == undefined;
+                            // Cache the tricky ones
+                            if (is_eq) localStorage.setItem(cacheKey, ISO_1);
+                        }
+                    }
+                    // Apply lookups
+                    loc.ISO_1 = stateIsoMap[ISO_1] ?? ISO_1;
+                    // Handle failures & boundaries
+                    if (loc.ISO_1 == "") {
+                        misses.push(loc);
+                        // Misses at the start as they are more important
+                        APIInput.unshift({pos: pos, lat: +loc.latitude, lon: +loc.longitude});
+                    } else if (checkBoundaries && !is_eq) {
                         APIInput.push({pos: pos, lat: +loc.latitude, lon: +loc.longitude});
                     }
                     return loc;
                 });
-                console.log("Misses & edge cases: " + misses.length + " of " + testResult.length, misses);
-                console.log("Begin API validation of " + APIInput.length + " edge cases & misses");
-                locationAPI(APIInput);
-                return testResult;
+                let logStr  = "Misses: " + misses.length;
+                    logStr += checkBoundaries ? ", boundary cases: " + (APIInput.length - misses.length) : "";
+                    logStr += " of " + stateTestResult.length;
+                console.log(logStr, misses, APIInput);
+                console.log("Begin API validation of " + APIInput.length + " cases");
+                stateLocAPI(APIInput);
+                return stateTestResult;
             }
-            async function locationAPI (points) {
+            const stoStateKey = (url) => url.slice(84).split("&")[0];
+            async function stateLocAPI (points) {
                 const ak = ("<5<ij;7j57<h9ghhf75>i>g;g=9f;=f:").split``.map(c => String.fromCharCode(c.charCodeAt() - 5)).join``;
                 let rem = points.length;
                 const urls = Object.fromEntries(points.map(p => ["https://api.opencagedata.com/geocode/v1/json?key=" + ak + "&q=" + encodeURIComponent(p.lat + "," + p.lon) + "&pretty=0&no_annotations=1", p.pos]));
+                let limitExceeded = false;
                 for (let url of Object.keys(urls)) {
+                    if (limitExceeded) break;
+                    // Try cache first
+                    // Should load some known to cache to begin with
+                    if (localStorage.getItem(stoStateKey(url))) {
+                        const stateCode = localStorage.getItem(stoStateKey(url));
+                        const pos = urls[url];
+                        stateTestResult[pos].ISO_1 = stateCode;
+                        continue;
+                    }
                     const request = new XMLHttpRequest();
                     request.open('GET', url, true);
                     request.onload = function() {
                         rem--;
                         console.log(rem + " remain to check");
-                        if (rem === 0) console.log("API Requests complete");
-                        if (request.status === 200) {
+                        if (rem <= 0) console.log("API Requests complete");
+                        if (request.status === 402) {
+                            limitExceeded = true;
+                            rem = 0;
+                            console.log("API limit exceeded, terminating");
+                        } else if (request.status === 200) {
                             const data = JSON.parse(request.responseText);
                             const stateCode = data.results[0].components["ISO_3166-2"] ? data.results[0].components["ISO_3166-2"][0] :
                                               data.results[0].components["ISO_3166-1_alpha-2"] + "-" + data.results[0].components.state_code;
                             const pos = urls[request.responseURL];
-                            testResult[pos].ISO_1 = isoMap[stateCode] ?? stateCode;
+                            stateCode = stateIsoMap[stateCode] ?? stateCode;
+                            stateTestResult[pos].ISO_1 = stateCode;
+                            // Cache result
+                            const lsKey = stoStateKey(request.responseURL);
+                            localStorage.setItem(lsKey, stateCode);
                         } else if (request.status <= 500) {
                             const data = JSON.parse(request.responseText);
                             console.error('Error: ' + data.status.message);
@@ -122,12 +180,16 @@
                     request.onerror = () => {
                         console.log("Unable to connect to server");
                         rem--;
-                        if (rem === 0) console.log("API Requests complete");
+                        if (rem <= 0) console.log("API Requests complete");
                     };
                     request.send();
                 }
             }
-            let isoMap = {
+            
+            // MC Read here
+            
+            // Remap to our preferred codes for Japan
+            let stateIsoMap = {
                 "JP-01":"JP-HKD",
                 "JP-02":"JP-AMR",
                 "JP-03":"JP-IWT",
