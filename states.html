@@ -145,7 +145,7 @@
                     // Try cache first
                     // Should load some known to cache to begin with
                     if (localStorage.getItem(stoStateKey(url))) {
-                        const stateCode = localStorage.getItem(stoStateKey(url));
+                        let stateCode = localStorage.getItem(stoStateKey(url));
                         const pos = urls[url];
                         stateTestResult[pos].ISO_1 = stateCode;
                         continue;
@@ -162,8 +162,8 @@
                             console.log("API limit exceeded, terminating");
                         } else if (request.status === 200) {
                             const data = JSON.parse(request.responseText);
-                            const stateCode = data.results[0].components["ISO_3166-2"] ? data.results[0].components["ISO_3166-2"][0] :
-                                              data.results[0].components["ISO_3166-1_alpha-2"] + "-" + data.results[0].components.state_code;
+                            let stateCode = data.results[0].components["ISO_3166-2"] ? data.results[0].components["ISO_3166-2"][0] :
+                                            data.results[0].components["ISO_3166-1_alpha-2"] + "-" + data.results[0].components.state_code;
                             const pos = urls[request.responseURL];
                             stateCode = stateIsoMap[stateCode] ?? stateCode;
                             stateTestResult[pos].ISO_1 = stateCode;
