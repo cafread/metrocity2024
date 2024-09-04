@@ -62,7 +62,7 @@
             function makeStateTestSuite () {
                 d3.csv("res/gadm/state_test.csv", (err, dat) => {
                     if (err) throw err;
-                    readStates(dat, false);
+                    readStates(dat, true);
                 });
             }
             let stateTestResult;
