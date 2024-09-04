@@ -62,7 +62,7 @@
             function makeStateTestSuite () {
                 d3.csv("res/gadm/state_test.csv", (err, dat) => {
                     if (err) throw err;
-                    readStates(dat, true);
+                    readStates(dat, false);
                 });
             }
             let stateTestResult;
@@ -135,10 +135,11 @@
                 return stateTestResult;
             }
             const stoStateKey = (url) => url.slice(84).split("&")[0];
+            let apiResult = [];
             async function stateLocAPI (points) {
                 const ak = ("<5<ij;7j57<h9ghhf75>i>g;g=9f;=f:").split``.map(c => String.fromCharCode(c.charCodeAt() - 5)).join``;
-                let rem = points.length;
                 const urls = Object.fromEntries(points.map(p => ["https://api.opencagedata.com/geocode/v1/json?key=" + ak + "&q=" + encodeURIComponent(p.lat + "," + p.lon) + "&pretty=0&no_annotations=1", p.pos]));
+                let rem = Object.keys(urls).length;
                 let limitExceeded = false;
                 for (let url of Object.keys(urls)) {
                     if (limitExceeded) break;
@@ -148,6 +149,8 @@
                         let stateCode = localStorage.getItem(stoStateKey(url));
                         const pos = urls[url];
                         stateTestResult[pos].ISO_1 = stateCode;
+                        rem--;
+                        console.log(rem + " remain to check");
                         continue;
                     }
                     const request = new XMLHttpRequest();
@@ -169,6 +172,7 @@
                             stateTestResult[pos].ISO_1 = stateCode;
                             // Cache result
                             const lsKey = stoStateKey(request.responseURL);
+                            apiResult.push([lsKey, stateCode]);
                             localStorage.setItem(lsKey, stateCode);
                         } else if (request.status <= 500) {
                             const data = JSON.parse(request.responseText);
