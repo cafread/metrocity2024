@@ -2,10 +2,11 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <script type="text/javascript" src="https://d3js.org/d3.v3.min.js"></script>
         <meta charset="utf-8">
         <link href="res/favicon.ico" rel="icon" type="image/x-icon" />
         <link href='https://fonts.googleapis.com/css?family=Lato:300,400,600,700' rel='stylesheet' type='text/css' />
+        <script type="text/javascript" src="https://d3js.org/d3.v3.min.js"></script>
+        <script type="text/javascript" src="res/stateCorrs.js"></script>
         <style type="text/css">
             html, body {
                 width: 100%;
@@ -17,6 +18,10 @@
                 font-size: 14px;
                 color: #333;
             }
+            #countrySvg {
+                width: 40000px;
+                height: 20000px;
+            }
             #stateSvg {
                 width: 3000000px;
                 height: 2000000px;
@@ -27,10 +32,18 @@
         </style>
     </head>
     <body>
-        <svg width="3000000" height="2000000" id="stateSvg"></svg>
-        <script type="text/javascript" src="res/stateCorrs.js"></script>
         <script type="text/javascript">
-            // Country read here
+            // Country code first
+            let countrySvg = d3.select('body').append('svg');
+            countrySvg.attr('width', 40000)
+                      .attr('height', 20000)
+                      .attr('id', 'countrySvg');
+            let countryProjection = d3.geo.mercator()
+                .scale(1 << 12)
+                .translate([15000, 9000]);
+            
+            countrySvg.remove();
+
             
             let stateJson = {};
             // Mercator appears to give the most stable results
@@ -38,7 +51,10 @@
             const stateProjection = d3.geo.mercator()
                 .scale(1 << 17)
                 .translate([1300000, 1250000]);
-            let stateSvg = d3.select("#stateSvg");
+            let stateSvg = d3.select('body').append('svg');
+            stateSvg.attr('width', 3000000)
+                    .attr('height', 2000000)
+                    .attr('id', 'stateSvg');
             d3.json("res/gadm/states.json", (err, dat) => {
                 if (err) throw err;
                 stateJson = dat;
