@@ -7,6 +7,7 @@
         <link href='https://fonts.googleapis.com/css?family=Lato:300,400,600,700' rel='stylesheet' type='text/css' />
         <script type="text/javascript" src="https://d3js.org/d3.v3.min.js"></script>
         <script type="text/javascript" src="res/stateCorrs.js"></script>
+        <script type="text/javascript" src="res/lookups.js"></script>
         <style type="text/css">
             html, body {
                 width: 100%;
@@ -33,38 +34,79 @@
     </head>
     <body>
         <script type="text/javascript">
-            // Country code first
-            let countrySvg = d3.select('body').append('svg');
-            countrySvg.attr('width', 40000)
-                      .attr('height', 20000)
-                      .attr('id', 'countrySvg');
-            let countryProjection = d3.geo.mercator()
-                .scale(1 << 12)
-                .translate([15000, 9000]);
-            
-            countrySvg.remove();
-
-            
-            let stateJson = {};
+            let results   = [];
+            let apiResult = [];
             // Mercator appears to give the most stable results
-            // Significant arcs do appear where points are far apart (CA-US border and within the continental US)
             const stateProjection = d3.geo.mercator()
                 .scale(1 << 17)
                 .translate([1300000, 1250000]);
-            let stateSvg = d3.select('body').append('svg');
-            stateSvg.attr('width', 3000000)
-                    .attr('height', 2000000)
-                    .attr('id', 'stateSvg');
-            d3.json("res/gadm/states.json", (err, dat) => {
-                if (err) throw err;
-                stateJson = dat;
-                stateRender();
-            });
-            let statePath = d3.geo.path()
-                .projection(stateProjection)
-            function stateRender() {
+            // const countryProjection = d3.geo.mercator()
+            //     .scale(1 << 12)
+            //     .translate([15000, 9000]);
+            
+            // function readCountryGeo() {
+            //     d3.json("https://unpkg.com/world-atlas@1.1.4/world/110m.json", (err, dat) => {
+            //         if (err) throw err;
+            //         drawCountryGeo(dat.objects.countries.geometries, true);
+            //     });
+            // }
+            // function drawCountryGeo(geo) {
+            //     let countrySvg = d3.select('body').append('svg');
+            //     countrySvg.attr('id', 'countrySvg')
+            //         .attr('width',  40000)
+            //         .attr('height', 20000);
+            //     let countryPath = d3.geo.path()
+            //         .projection(countryProjection);
+            //     countrySvg.selectAll("path")
+            //         .data(geo)
+            //         .enter()
+            //             .append("path")
+            //             .attr("d", countryPath)
+            //             .attr("cc", d => countryIntCode[d.id])
+            //             .style("stroke", "#aaa")
+            //             .style("stroke-width", "0.01")
+            //             .style("fill", "#0000FF")
+            //             .on("mouseover", d => console.log(countryIntCode[d.id]));
+            //     setTimeout(makeTestData, 200);
+            // }
+            
+            
+            function makeTestData () { // Should bind this to a button to give a UI, another button to read csv(?) or form text
+                // d3.csv("res/gadm/state_test.csv", (err, dat) => {
+                //     if (err) throw err;
+                //     // Country code work first
+                //     // That will call the state work on completion
+                //     // Which will call the metro city read work on completion
+                //     // For now, only going to do the state work
+                //     readStates(dat, true);
+                // });
+            }
+
+            function getCountryCodes() {
+                // Write code to read here
+                countrySvg.remove();
+            }
+
+            
+            // Significant arcs do appear where points are far apart (CA-US border and within the continental US)
+            function readStateGeo() {
+                d3.json("res/gadm/states.json", (err, dat) => {
+                    if (err) throw err;
+                    stateRender(dat);
+                });
+            }
+
+            
+            
+            function stateRender(stateGeo) {
+                let stateSvg = d3.select('body').append('svg');
+                let statePath = d3.geo.path()
+                    .projection(stateProjection);
+                stateSvg.attr('width', 3000000)
+                        .attr('height', 2000000)
+                        .attr('id', 'stateSvg');
                 stateSvg.selectAll("path")
-                    .data(stateJson.features)
+                    .data(stateGeo.features)
                     .enter()
                         .append("path")
                         .attr("d", statePath)
@@ -73,19 +115,14 @@
                         .style("stroke-width", "0.01")
                         .style("fill", "#0000FF")
                         .on("mouseover", d => console.log(d.properties.ISO_1));
-                setTimeout(makeStateTestSuite, 200);
+                setTimeout(makeTestData, 200);
             }
-            function makeStateTestSuite () {
-                d3.csv("res/gadm/state_test.csv", (err, dat) => {
-                    if (err) throw err;
-                    readStates(dat, true);
-                });
-            }
-            let stateTestResult;
+
+
             function readStates (dat, checkBoundaries=false) {
                 let misses = [];
                 let APIInput = [];
-                stateTestResult = dat.map((loc, pos) => {
+                results = dat.map((loc, pos) => {
                     // Use cache where possible
                     let cacheKey = +loc.latitude + "%2C" + +loc.longitude;
                     if (stateCorrs.hasOwnProperty(cacheKey)) {
@@ -144,14 +181,13 @@
                 });
                 let logStr  = "Misses: " + misses.length;
                     logStr += checkBoundaries ? ", boundary cases: " + (APIInput.length - misses.length) : "";
-                    logStr += " of " + stateTestResult.length;
+                    logStr += " of " + results.length;
                 console.log(logStr, misses, APIInput);
                 console.log("Begin API validation of " + APIInput.length + " cases");
                 stateLocAPI(APIInput);
-                return stateTestResult;
+                return results;
             }
             const stoStateKey = (url) => url.slice(84).split("&")[0];
-            let apiResult = [];
             async function stateLocAPI (points) {
                 const ak = ("<5<ij;7j57<h9ghhf75>i>g;g=9f;=f:").split``.map(c => String.fromCharCode(c.charCodeAt() - 5)).join``;
                 const urls = Object.fromEntries(points.map(p => ["https://api.opencagedata.com/geocode/v1/json?key=" + ak + "&q=" + encodeURIComponent(p.lat + "," + p.lon) + "&pretty=0&no_annotations=1", p.pos]));
@@ -164,7 +200,7 @@
                     if (localStorage.getItem(stoStateKey(url))) {
                         let stateCode = localStorage.getItem(stoStateKey(url));
                         const pos = urls[url];
-                        stateTestResult[pos].ISO_1 = stateCode;
+                        results[pos].ISO_1 = stateCode;
                         rem--;
                         console.log(rem + " remain to check");
                         continue;
@@ -185,7 +221,7 @@
                                             data.results[0].components["ISO_3166-1_alpha-2"] + "-" + data.results[0].components.state_code;
                             const pos = urls[request.responseURL];
                             stateCode = stateIsoMap[stateCode] ?? stateCode;
-                            stateTestResult[pos].ISO_1 = stateCode;
+                            results[pos].ISO_1 = stateCode;
                             // Cache result
                             const lsKey = stoStateKey(request.responseURL);
                             apiResult.push([lsKey, stateCode]);
@@ -205,60 +241,8 @@
                     request.send();
                 }
             }
-            
-            // MC Read here
-            
-            // Remap to our preferred codes for Japan
-            let stateIsoMap = {
-                "JP-01":"JP-HKD",
-                "JP-02":"JP-AMR",
-                "JP-03":"JP-IWT",
-                "JP-04":"JP-MYG",
-                "JP-05":"JP-AKT",
-                "JP-06":"JP-YMT",
-                "JP-07":"JP-FKS",
-                "JP-08":"JP-IBR",
-                "JP-09":"JP-TCG",
-                "JP-10":"JP-GUM",
-                "JP-11":"JP-STM",
-                "JP-12":"JP-CHB",
-                "JP-13":"JP-TOK",
-                "JP-14":"JP-KNG",
-                "JP-15":"JP-NGT",
-                "JP-16":"JP-TYM",
-                "JP-17":"JP-ISK",
-                "JP-18":"JP-FUK",
-                "JP-19":"JP-YMN",
-                "JP-20":"JP-NGN",
-                "JP-21":"JP-GIF",
-                "JP-22":"JP-SZO",
-                "JP-23":"JP-ACH",
-                "JP-24":"JP-MIE",
-                "JP-25":"JP-SHG",
-                "JP-26":"JP-KYT",
-                "JP-27":"JP-OSK",
-                "JP-28":"JP-HYG",
-                "JP-29":"JP-NAR",
-                "JP-30":"JP-WKY",
-                "JP-31":"JP-TGR",
-                "JP-32":"JP-SMN",
-                "JP-33":"JP-OKY",
-                "JP-34":"JP-HRS",
-                "JP-35":"JP-YMG",
-                "JP-36":"JP-TKS",
-                "JP-37":"JP-KGW",
-                "JP-38":"JP-EHM",
-                "JP-39":"JP-KOC",
-                "JP-40":"JP-FKK",
-                "JP-41":"JP-SAG",
-                "JP-42":"JP-NGS",
-                "JP-43":"JP-KMM",
-                "JP-44":"JP-OIT",
-                "JP-45":"JP-MYZ",
-                "JP-46":"JP-KGS",
-                "JP-47":"JP-OKN",
-                "NA":""
-            }
+
+            readStateGeo();
         </script>
     </body>
 </html>

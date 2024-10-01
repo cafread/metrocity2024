@@ -225,8 +225,8 @@ function genCartoDbTileUrl (d) {
   let [xTile, yTile, zoomLevel] = d;
   if (d[0] <   0) xTile += 128; // 0-127 is specific to this zoom level
   if (d[0] > 127) xTile -= 128;
-  //let cartoDbTileUrl = "https://" + ["a", "b", "c"][Math.random() * 3 | 0] + ".basemaps.cartocdn.com/light_all/" + zoomLevel + "/" + xTile + "/" + yTile + ".png";
-  let cartoDbTileUrl = "https://cartocdn_" + ["a", "b", "c"][Math.random() * 3 | 0] + ".global.ssl.fastly.net/base-eco/" + zoomLevel + "/" + xTile + "/" + yTile + ".png";
+  let cartoDbTileUrl = "https://" + ["a", "b", "c", "d"][Math.random() * 3 | 0] + ".basemaps.cartocdn.com/rastertiles/voyager_nolabels/" + zoomLevel + "/" + xTile + "/" + yTile + ".png";
+  //let cartoDbTileUrl = "https://cartocdn_" + ["a", "b", "c"][Math.random() * 3 | 0] + ".global.ssl.fastly.net/base-eco/" + zoomLevel + "/" + xTile + "/" + yTile + ".png";
   // https://cartocdn_{s}.global.ssl.fastly.net/base-eco/{z}/{x}/{y}.png
   return cartoDbTileUrl;
 }
