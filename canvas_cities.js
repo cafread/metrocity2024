@@ -395,7 +395,7 @@ function dispWIP () {
 }
 function topLeftTile () {
   //let tileCoords = d3.select("#container").selectAll(".tile")[0][0].map(d => d3.select(d).attr("src").substr(44, 15).replace(".png", "").split("/"));
-  let tileCoords = d3.select("#container").selectAll(".tile")[0].map(d => d.src.substr(52).replace('.png', '').split("/").map(Number));
+  let tileCoords = d3.select("#container").selectAll(".tile")[0].map(d => d.src.substr(-12).replace('.png', '').split("/").slice(-2).map(Number));
   let tileY = d3.min(tileCoords, d => d[1]);
   // When crossing the international date line, the 'x' tile property resets to zero, but we want the min of the 'high' x values
   let minTileX = d3.min(tileCoords, d => d[0]);
