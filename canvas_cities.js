@@ -567,10 +567,3 @@ function formatLocation (p, k) {
   return (p[1] < 0 ? format(-p[1]) + " S" : format(p[1]) + " N") + " "
        + (p[0] < 0 ? format(-p[0]) + " W" : format(p[0]) + " E");
 }
-function listTiles () {
-  // For updating list of master tiles
-  let xmlHttp = new XMLHttpRequest();
-  xmlHttp.open('GET', "/tiles/", false); // False for synchronous request
-  xmlHttp.send(null);
-  return xmlHttp.responseText.split('addRow("').slice(3, 10000).map(f => f.substr(0, 7));
-}
