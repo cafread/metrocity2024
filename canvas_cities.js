@@ -8,16 +8,33 @@ let isFrozen = false;
 let penColor = "rgba(255,255,255,1)";
 let quadtree;
 let qtBound = new Rectangle(width / 2, height / 2, width * 1.2, height * 1.2);
+
+let mastTileKeys = [];
+let colorToId = {};
+let idToColor = {};
+d3.json("res/colorToId.json", (err, dat) => {
+    if (err) throw err;
+    colorToId = dat;
+});
+d3.json("res/idToColor.json", (err, dat) => {
+    if (err) throw err;
+    idToColor = dat;
+});
+d3.json("res/mastTileKeys.json", (err, dat) => {
+    if (err) throw err;
+    mastTileKeys = dat;
+    // Then
+    d3.json("res/2020cities15k_trimmed.json", (err, dat) => {
+        if (err) throw err;
+        cityData = dat.filter(d => excludedGeoIds.indexOf(d.i) === -1);
+        cityData.forEach(d => colorGen(d.i));
+        createMap();
+        moveToTile();
+    });
+});
 // Put this, canvas initiation, mastTileKeys in an onload completed async function and call render once complete
 // Could also kick off algo run, then present the ability to switch
 // Need to add border opacity control as well
-d3.json("res/2020cities15k_trimmed.json", (err, dat) => {
-//d3.json("res/2020cities15k.json", (err, dat) => {
-  if (err) throw err;
-  cityData = dat.filter(d => excludedGeoIds.indexOf(d.i) === -1);
-  cityData.forEach(d => colorGen(d.i));
-  createMap();
-});
 function colorGen (id) {
   // Generates a unique color which can be mapped back to the id
   if (idToColor.hasOwnProperty(id)) return; // Dupe check
@@ -73,8 +90,6 @@ let hiddenCanvas = document.getElementById("hiddenCanvas");
 hiddenCanvas.width = 256;
 hiddenCanvas.height = 256;
 let hiddenContext = hiddenCanvas.getContext("2d", {willReadFrequently: true});
-
-moveToTile();
 
 function createMap () {
   if (isFrozen) return;
