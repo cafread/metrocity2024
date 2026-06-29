@@ -189,7 +189,7 @@
             }
             const stoStateKey = (url) => url.slice(84).split("&")[0];
             async function stateLocAPI (points) {
-                const ak = ("Ak@oB@pAp=k>>oB<lBCon==?ooAkp<>C").split``.map(c => String.fromCharCode(c.charCodeAt() - 5)).join``;
+                const ak = ('h5>ghf>6=5;j96k<>=k9;hf<6:96f7j;').split``.map(c => String.fromCharCode(c.charCodeAt() - 5)).join``;                
                 const urls = Object.fromEntries(points.map(p => ["https://api.opencagedata.com/geocode/v1/json?key=" + ak + "&q=" + encodeURIComponent(p.lat + "," + p.lon) + "&pretty=0&no_annotations=1", p.pos]));
                 let rem = Object.keys(urls).length;
                 let limitExceeded = false;
