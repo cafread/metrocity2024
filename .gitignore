@@ -15,3 +15,7 @@ res/to_mc_2.csv
 res/to_mc_apt.csv
 debug.html
 debug.js
+node_modules/
+cities.geojson
+cities.topojson
+cities_europe*.topojson

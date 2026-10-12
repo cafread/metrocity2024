@@ -1,0 +1,1840 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>City Polygons Viewer</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    #map { position: absolute; top: 0; bottom: 0; left: 0; right: 300px; }
+    #sidebar {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      right: 0;
+      width: 300px;
+      background: #f5f5f5;
+      padding: 10px;
+      box-sizing: border-box;
+      overflow-y: auto;
+      border-left: 1px solid #ccc;
+    }
+    #search {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 10px;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    #results {
+      max-height: 300px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+    }
+    .result-item {
+      padding: 6px 8px;
+      cursor: pointer;
+      border-bottom: 1px solid #ddd;
+      font-size: 13px;
+    }
+    .result-item:hover { background: #e0e0e0; }
+    #info {
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    #info h3 { margin: 0 0 10px 0; }
+    #stats {
+      margin-top: 15px;
+      padding: 10px;
+      background: white;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: calc(50% - 150px);
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 20px 40px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 1000;
+    }
+    #controls {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: white;
+      border-radius: 4px;
+    }
+    .control-group {
+      margin-bottom: 8px;
+    }
+    .control-group label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .control-group label.disabled {
+      color: #999;
+      cursor: not-allowed;
+    }
+    .control-group input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    .control-group input[type="checkbox"]:disabled {
+      cursor: not-allowed;
+    }
+    #editModeNotice {
+      display: none;
+      padding: 8px;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+
+    /* Edit mode cursors */
+    #map.edit-mode { cursor: default; }
+    #map.add-mode { cursor: crosshair; }
+
+    /* Edit mode radio buttons */
+    .radio-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .radio-group label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .radio-group input[type="radio"] {
+      margin-right: 4px;
+    }
+
+    /* Action buttons */
+    .action-buttons {
+      margin-top: 8px;
+      display: flex;
+      gap: 8px;
+    }
+    .action-buttons button {
+      flex: 1;
+      padding: 6px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      background: white;
+      border-radius: 3px;
+    }
+    .action-buttons button:hover:not(:disabled) {
+      background: #f0f0f0;
+    }
+    .action-buttons button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Commit/Push section */
+    .commit-section {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #ddd;
+    }
+    .commit-section button {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      background: white;
+      border-radius: 3px;
+    }
+    .commit-section button:hover:not(:disabled) {
+      background: #f0f0f0;
+    }
+    .commit-section button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .commit-section button.primary {
+      background: #28a745;
+      color: white;
+      border-color: #28a745;
+    }
+    .commit-section button.primary:hover:not(:disabled) {
+      background: #218838;
+    }
+    #statusIndicator {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 8px;
+      padding: 4px 8px;
+      background: #f8f9fa;
+      border-radius: 3px;
+    }
+    #statusIndicator.has-changes {
+      background: #fff3cd;
+      color: #856404;
+    }
+    #statusIndicator.has-commit {
+      background: #d4edda;
+      color: #155724;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading city polygons...</div>
+  <div id="map"></div>
+  <div id="sidebar">
+    <h2 style="margin-top:0">City Viewer</h2>
+
+    <div id="controls">
+      <div class="control-group">
+        <label>
+          <input type="checkbox" id="showCountries" checked>
+          Show Country Borders
+        </label>
+      </div>
+      <div class="control-group">
+        <label id="editModeLabel" class="disabled">
+          <strong style="font-size: 13px; display: block; margin-bottom: 4px;">Edit Mode (zoom ≥8):</strong>
+        </label>
+        <div style="margin-left: 20px;">
+          <label>
+            <input type="checkbox" id="editMode" disabled>
+            Enable Editing
+          </label>
+        </div>
+      </div>
+      <div class="control-group">
+        <label id="snapModeLabel" class="disabled">
+          <strong style="font-size: 13px; display: block; margin-bottom: 4px;">Snap Mode:</strong>
+        </label>
+        <div class="radio-group" style="flex-direction: column; gap: 4px; margin-left: 20px;">
+          <label>
+            <input type="radio" name="snapMode" value="none" checked disabled>
+            None
+          </label>
+          <label>
+            <input type="radio" name="snapMode" value="borders" disabled>
+            Borders
+          </label>
+          <label>
+            <input type="radio" name="snapMode" value="cities" disabled>
+            Cities
+          </label>
+        </div>
+      </div>
+      <div id="editModeNotice" style="display: none;">
+        <div class="radio-group">
+          <label>
+            <input type="radio" name="editAction" value="edit" checked>
+            Drag
+          </label>
+          <label>
+            <input type="radio" name="editAction" value="add">
+            Add
+          </label>
+          <label>
+            <input type="radio" name="editAction" value="delete">
+            Delete
+          </label>
+        </div>
+
+        <div class="action-buttons">
+          <button id="undoBtn" disabled title="Undo last add/delete operation">Undo</button>
+          <button id="resetBtn" title="Reset all changes">Reset</button>
+        </div>
+
+        <div class="commit-section">
+          <div id="statusIndicator">No changes</div>
+          <button id="commitBtn" disabled title="Save changes to local storage">Commit</button>
+          <button id="pushBtn" disabled title="Push committed changes to server (not implemented)">Push</button>
+        </div>
+      </div>
+    </div>
+
+    <input type="text" id="search" placeholder="Search cities...">
+    <div id="results"></div>
+    <div id="info">
+      <h3>Click a city polygon</h3>
+      <p>Or search above to find a city</p>
+    </div>
+    <div id="stats"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+  <script>
+    // Western Europe view
+    const map = L.map('map').setView([48.8, 2.3], 6);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      maxZoom: 19
+    }).addTo(map);
+
+    // Global mousemove handler for vertex dragging
+    map.on('mousemove', function(e) {
+      if (!e || !e.latlng) return;
+
+      vertexMarkers.forEach(m => {
+        if (m && m._dragging && m._vertexData && m._affectedCities) {
+          let targetLatLng = e.latlng;
+
+          if (snapMode !== 'none') {
+            // Throttle expensive snap calculations for cities mode only
+            const now = Date.now();
+            const timeSinceLastSnap = now - lastSnapCheckTime;
+
+            if (snapMode === 'cities' && timeSinceLastSnap < SNAP_THROTTLE_MS && m._lastCalculatedSnap) {
+              // Reuse last calculated snap target (but still allow free movement if no snap)
+              if (m._lastCalculatedSnap._snapInfo) {
+                targetLatLng = m._lastCalculatedSnap;
+              } else {
+                // No snap found last time, use current mouse position for smooth free movement
+                targetLatLng = e.latlng;
+              }
+            } else {
+              // Calculate new snap target
+              targetLatLng = snapToNearestFeature(e.latlng, m._snapLock);
+              m._lastCalculatedSnap = targetLatLng;
+              if (snapMode === 'cities') {
+                lastSnapCheckTime = now;
+              }
+            }
+
+            // If we found a new snap, create/update the snap lock
+            if (targetLatLng._snapInfo && !m._snapLock) {
+              m._snapLock = {
+                snapInfo: targetLatLng._snapInfo,
+                snapLatLng: targetLatLng
+              };
+              console.log(`Snap locked to ${targetLatLng._snapInfo.type} of ${targetLatLng._snapInfo.cityName}`);
+            }
+          }
+
+          // Show snap preview marker
+          if (snapMode === 'cities' && targetLatLng._snapInfo) {
+            if (!snapPreviewMarker) {
+              snapPreviewMarker = L.circleMarker([0, 0], {
+                radius: 8,
+                fillColor: '#00ff00',
+                fillOpacity: 0.6,
+                color: '#ffffff',
+                weight: 3,
+                interactive: false,
+                pane: 'markerPane'
+              }).addTo(map);
+            }
+            snapPreviewMarker.setLatLng(targetLatLng);
+
+            // Update tooltip text based on snap type
+            const info = targetLatLng._snapInfo;
+            const tooltipText = info.type === 'vertex'
+              ? `Snap to vertex (${info.cityName})`
+              : `Snap to edge (${info.cityName})`;
+            snapPreviewMarker.bindTooltip(tooltipText, { permanent: false, direction: 'top' }).openTooltip();
+          } else {
+            // Remove snap preview if not snapping
+            if (snapPreviewMarker) {
+              map.removeLayer(snapPreviewMarker);
+              snapPreviewMarker = null;
+            }
+          }
+
+          m.setLatLng(targetLatLng);
+          updatePolygonGeometry(m, targetLatLng, m._affectedCities);
+        }
+      });
+    });
+
+    // Global mouseup handler to catch drag end anywhere on map
+    map.on('mouseup', function(e) {
+      vertexMarkers.forEach(m => {
+        if (m && m._dragging) {
+          // End the drag even if mouseup happens away from marker
+          endVertexDrag(m);
+        }
+      });
+    });
+
+    // Helper function to end vertex drag and clean up
+    function endVertexDrag(marker) {
+      if (!marker._dragging) return;
+
+      marker._dragging = false;
+      map.dragging.enable();
+
+      const finalLatLng = marker.getLatLng();
+      const oldLatLng = marker._dragStartLatLng;
+
+      // Check if we snapped and handle accordingly
+      if (finalLatLng._snapInfo && snapMode === 'cities') {
+        const snapInfo = finalLatLng._snapInfo;
+
+        if (snapInfo.type === 'edge') {
+          // Add the dragged vertex to the target polygon's edge
+          console.log(`Snapped to edge of ${snapInfo.cityName} - adding vertex`);
+
+          const targetCityVerts = cityVertices.get(snapInfo.cityId);
+          if (targetCityVerts) {
+            const targetRingVerts = targetCityVerts.get(snapInfo.ringIdx);
+            if (targetRingVerts) {
+              // Create a new shared vertex object at the snap position
+              const sharedVertex = marker._vertexData.vertexObj;
+              sharedVertex.lat = finalLatLng.lat;
+              sharedVertex.lng = finalLatLng.lng;
+
+              // Insert after edgeStartIdx
+              const insertIdx = snapInfo.edgeStartIdx + 1;
+              targetRingVerts.splice(insertIdx, 0, sharedVertex);
+
+              // Sync to target polygon geometry
+              const targetCoords = snapInfo.layer.feature.geometry.coordinates;
+              targetCoords[snapInfo.ringIdx] = targetRingVerts.map(v => [v.lng, v.lat]);
+
+              // Update target polygon visual
+              const targetLatLngs = targetCoords.map(r => r.map(c => [c[1], c[0]]));
+              map.removeLayer(snapInfo.layer);
+              snapInfo.layer.setLatLngs(targetLatLngs);
+              snapInfo.layer.addTo(map);
+
+              console.log(`Added vertex to ${snapInfo.cityName} at position ${insertIdx}`);
+            }
+          }
+        } else if (snapInfo.type === 'vertex') {
+          // Snapped to existing vertex - vertices are now shared
+          console.log(`Snapped to vertex of ${snapInfo.cityName} - vertices now shared`);
+
+          // Replace our vertex object with the target's vertex object to share reference
+          const sharedVertex = snapInfo.vertexObj;
+          marker._vertexData.vertexObj.lat = sharedVertex.lat;
+          marker._vertexData.vertexObj.lng = sharedVertex.lng;
+        }
+      }
+
+      // Record the edit BEFORE rebuilding index (pass pre-captured state)
+      recordVertexEdit(marker._vertexId, oldLatLng, finalLatLng, marker._vertexData, marker._affectedCities, 'move', marker._clonedStateBeforeDrag);
+
+      // Remove snap preview marker
+      if (snapPreviewMarker) {
+        map.removeLayer(snapPreviewMarker);
+        snapPreviewMarker = null;
+      }
+
+      // Clear snap lock
+      delete marker._snapLock;
+
+      // Rebuild shared vertex index after drag
+      buildSharedVertexIndex();
+
+      // Clear affected cities
+      delete marker._affectedCities;
+
+      // Reset marker style
+      marker.setStyle({
+        fillColor: '#3388ff',
+        radius: 5,
+        weight: 2
+      });
+
+      // Rebuild markers to update lookupKeys and vertex references
+      if (selectedCityLayer) {
+        showVertexMarkers(selectedCityLayer);
+      }
+    }
+
+    let geojsonLayer;
+    let countriesLayer;
+    let allFeatures = [];
+    let editModeEnabled = false;
+    let snapMode = 'none'; // 'none' | 'borders' | 'cities'
+    let currentEditAction = 'edit'; // 'edit' | 'add' | 'delete'
+    let vertexMarkers = [];
+    let snapPreviewMarker = null; // Visual feedback for snap target
+    let lastSnapCheckTime = 0; // Throttle snap calculations
+    const SNAP_THROTTLE_MS = 50; // Check for snaps every 50ms (20 times/sec)
+    let vertexIdCounter = 0;
+    let vertexLookup = new Map(); // Maps vertexId -> { marker, cityId, ringIdx, vertexObj }
+    let sharedVertices = new Map(); // Maps "lat,lng" -> Array of { cityId, cityName, ringIdx, vertexId, layer }
+    let selectedCityLayer = null;
+    let editHistory = []; // Array of edit operations with cloned state
+    let modifiedCities = new Map(); // Maps cityId -> modified feature
+    let cityVertices = new Map(); // Maps cityId -> Map(ringIdx -> Array of vertex objects {id, lat, lng})
+    let committedChanges = null; // Tracks if there's a commit in localStorage ready to push
+    const MIN_EDIT_ZOOM = 8;
+    const LOCALSTORAGE_KEY = 'metrocity_edits';
+
+    // Color by population
+    function getColor(pop) {
+      return pop > 5000000 ? '#800026' :
+             pop > 1000000 ? '#BD0026' :
+             pop > 500000  ? '#E31A1C' :
+             pop > 200000  ? '#FC4E2A' :
+             pop > 100000  ? '#FD8D3C' :
+             pop > 50000   ? '#FEB24C' :
+             pop > 20000   ? '#FED976' :
+                             '#FFEDA0';
+    }
+
+    function style(feature) {
+      return {
+        fillColor: getColor(feature.properties.population),
+        weight: 1,
+        opacity: 1,
+        color: '#666',
+        fillOpacity: 0.6
+      };
+    }
+
+    function highlightFeature(e) {
+      const layer = e.target;
+      layer.setStyle({
+        weight: 3,
+        color: '#333',
+        fillOpacity: 0.8
+      });
+      // Don't bring to front - keep vertex markers on top
+    }
+
+    function resetHighlight(e) {
+      geojsonLayer.resetStyle(e.target);
+    }
+
+    function countVertices(feature) {
+      const geom = feature.geometry;
+      if (!geom) return 0;
+      // All geometries are now Polygons (sanitized data)
+      return geom.coordinates.reduce((sum, ring) => sum + ring.length, 0);
+    }
+
+    function showInfo(feature) {
+      const props = feature.properties;
+      const verts = countVertices(feature);
+      document.getElementById('info').innerHTML = `
+        <h3>${props.name}</h3>
+        <p><strong>ID:</strong> ${props.id}</p>
+        <p><strong>Population:</strong> ${props.population.toLocaleString()}</p>
+        <p><strong>Vertices:</strong> ${verts}</p>
+      `;
+    }
+
+    function zoomToFeature(e) {
+      const layer = e.target;
+      map.fitBounds(layer.getBounds());
+      showInfo(layer.feature);
+
+      // Select this city for editing
+      selectedCityLayer = layer;
+
+      // Show vertex markers if in edit mode and zoomed in enough
+      if (editModeEnabled && map.getZoom() >= MIN_EDIT_ZOOM) {
+        showVertexMarkers(layer);
+      }
+    }
+
+    function onEachFeature(feature, layer) {
+      layer.on({
+        mouseover: highlightFeature,
+        mouseout: resetHighlight,
+        click: zoomToFeature
+      });
+    }
+
+    // Search functionality
+    const searchInput = document.getElementById('search');
+    const resultsDiv = document.getElementById('results');
+
+    searchInput.addEventListener('input', (e) => {
+      const query = e.target.value.toLowerCase();
+      if (query.length < 2) {
+        resultsDiv.innerHTML = '';
+        return;
+      }
+
+      const matches = allFeatures
+        .filter(f => f.properties.name.toLowerCase().includes(query))
+        .slice(0, 20);
+
+      resultsDiv.innerHTML = matches.map(f =>
+        `<div class="result-item" data-id="${f.properties.id}">${f.properties.name} (pop: ${f.properties.population.toLocaleString()})</div>`
+      ).join('');
+    });
+
+    resultsDiv.addEventListener('click', (e) => {
+      if (e.target.classList.contains('result-item')) {
+        const id = parseInt(e.target.dataset.id);
+        const feature = allFeatures.find(f => f.properties.id === id);
+        if (feature) {
+          showInfo(feature);
+          // Find and zoom to the layer
+          geojsonLayer.eachLayer(layer => {
+            if (layer.feature.properties.id === id) {
+              map.fitBounds(layer.getBounds());
+              highlightFeature({ target: layer });
+              setTimeout(() => resetHighlight({ target: layer }), 2000);
+            }
+          });
+        }
+      }
+    });
+
+    // Edit Mode UI controls
+    const editModeCheckbox = document.getElementById('editMode');
+    const editModeLabel = document.getElementById('editModeLabel');
+    const snapModeLabel = document.getElementById('snapModeLabel');
+    const snapRadios = document.querySelectorAll('input[name="snapMode"]');
+    const editModeNotice = document.getElementById('editModeNotice');
+    const showCountriesCheckbox = document.getElementById('showCountries');
+
+    editModeCheckbox.addEventListener('change', (e) => {
+      editModeEnabled = e.target.checked;
+      snapRadios.forEach(radio => radio.disabled = !editModeEnabled);
+      if (editModeEnabled) {
+        snapModeLabel.classList.remove('disabled');
+      } else {
+        snapModeLabel.classList.add('disabled');
+      }
+      editModeNotice.style.display = editModeEnabled ? 'block' : 'none';
+
+      if (editModeEnabled) {
+        const zoom = map.getZoom();
+        console.log('Edit mode enabled - click a city to edit its vertices');
+        if (zoom >= MIN_EDIT_ZOOM && selectedCityLayer) {
+          showVertexMarkers(selectedCityLayer);
+        }
+      } else {
+        console.log('Edit mode disabled');
+        clearVertexMarkers();
+      }
+    });
+
+    snapRadios.forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        snapMode = e.target.value;
+        console.log('Snap mode changed to:', snapMode);
+      });
+    });
+
+    showCountriesCheckbox.addEventListener('change', (e) => {
+      if (countriesLayer) {
+        if (e.target.checked) {
+          countriesLayer.addTo(map);
+          if (geojsonLayer) {
+            geojsonLayer.setStyle({ fillOpacity: 0.5, opacity: 0.8 });
+          }
+        } else {
+          map.removeLayer(countriesLayer);
+          if (geojsonLayer) {
+            geojsonLayer.setStyle({ fillOpacity: 0.6, opacity: 1 });
+          }
+        }
+      }
+    });
+
+    // Show vertex markers for a specific city layer
+    function showVertexMarkers(layer) {
+      clearVertexMarkers();
+      if (!layer || !layer.feature) return;
+
+      const coords = layer.feature.geometry.coordinates;
+      // All geometries are now Polygons (sanitized data)
+      addMarkersForRings(coords, layer, 0);
+      console.log(`Showing ${vertexMarkers.length} vertex markers for ${layer.feature.properties.name}`);
+    }
+
+    function addMarkersForRings(rings, parentLayer, ringOffset = 0) {
+      const cityId = parentLayer.feature.properties.id;
+      const cityName = parentLayer.feature.properties.name;
+
+      // Get or initialize cityVertices for this city
+      if (!cityVertices.has(cityId)) {
+        initializeCityVertices(parentLayer);
+      }
+
+      const cityVerts = cityVertices.get(cityId);
+
+      rings.forEach((ring, ringIdx) => {
+        // Only show markers for outer rings (index 0) or show all if needed
+        if (ringIdx > 0) return; // Skip holes for now
+
+        // Get existing vertex objects for this ring
+        const vertexObjs = cityVerts.get(ringIdx);
+        if (!vertexObjs) {
+          console.warn(`No vertex objects found for city ${cityId} ring ${ringIdx}`);
+          return;
+        }
+
+        vertexObjs.forEach((vertexObj) => {
+          const latLng = L.latLng(vertexObj.lat, vertexObj.lng);
+
+          const marker = L.circleMarker(latLng, {
+            radius: 5,
+            fillColor: '#3388ff',
+            fillOpacity: 1,
+            color: 'white',
+            weight: 2,
+            interactive: true,
+            draggable: false,
+            pane: 'markerPane'
+          });
+
+          // Store metadata for this vertex
+          marker._vertexId = vertexObj.id;
+          marker._vertexData = {
+            cityId: cityId,
+            cityName: cityName,
+            ringIdx: ringIdx,
+            vertexObj: vertexObj,
+            latLng: latLng,
+            // Store the lookup key for shared vertex tracking
+            lookupKey: `${vertexObj.lat.toFixed(7)},${vertexObj.lng.toFixed(7)}`
+          };
+
+          // Hover handlers
+          marker.on('mouseover', function(e) {
+            this.setStyle({
+              fillColor: '#ff8800',
+              radius: 7,
+              weight: 3
+            });
+            this.bringToFront();
+          });
+
+          marker.on('mouseout', function(e) {
+            // Don't reset if currently dragging
+            if (!this._dragging) {
+              this.setStyle({
+                fillColor: '#3388ff',
+                radius: 5,
+                weight: 2
+              });
+            }
+          });
+
+          // Drag start (only in edit mode)
+          marker.on('mousedown', function(e) {
+            L.DomEvent.stopPropagation(e);
+
+            if (currentEditAction === 'delete') {
+              // Delete mode: remove this vertex
+              deleteVertex(this);
+              return;
+            }
+
+            if (currentEditAction !== 'edit') {
+              // Not in drag mode
+              return;
+            }
+
+            // Edit mode: start drag
+            this._dragging = true;
+            this._dragStartLatLng = this.getLatLng();
+            this._snapLock = null; // No snap locked initially
+            this._lastSnapCheckPos = null; // Track position for snap lock break detection
+            map.dragging.disable();
+
+            // Look up affected cities at drag start and enhance with vertex object references
+            const lookupKey = this._vertexData.lookupKey;
+            const affectedCitiesRaw = sharedVertices.get(lookupKey) || [];
+
+            // Enhance with direct vertex object references
+            this._affectedCities = affectedCitiesRaw.map(cityRef => {
+              const cityVerts = cityVertices.get(cityRef.cityId);
+              const ringVerts = cityVerts ? cityVerts.get(cityRef.ringIdx) : null;
+              const vertexObj = ringVerts ? ringVerts.find(v => v.id === cityRef.vertexId) : null;
+
+              return {
+                ...cityRef,
+                vertexObj: vertexObj  // Direct reference to the actual vertex object
+              };
+            }).filter(c => c.vertexObj);  // Only keep ones where we found the vertex
+
+            // Clone state NOW before any changes for undo
+            this._clonedStateBeforeDrag = new Map();
+            this._affectedCities.forEach(cityRef => {
+              if (cityVertices.has(cityRef.cityId)) {
+                const cityVerts = cityVertices.get(cityRef.cityId);
+                const clonedVerts = new Map();
+                cityVerts.forEach((ringVerts, ringIdx) => {
+                  clonedVerts.set(ringIdx, ringVerts.map(v => ({...v})));
+                });
+                this._clonedStateBeforeDrag.set(cityRef.cityId, clonedVerts);
+              }
+            });
+
+            // Log affected cities with geometry types
+            const cityInfo = this._affectedCities.map(c =>
+              `${c.cityName} (${c.layer.feature.geometry.type})`
+            ).join(', ');
+            console.log(`Drag start: ${this._affectedCities.length} cities affected: ${cityInfo}`);
+
+            this.setStyle({
+              fillColor: '#ff0000',
+              radius: 8,
+              weight: 3
+            });
+          });
+
+          // Drag end (also handled by global map mouseup for reliability)
+          marker.on('mouseup', function(e) {
+            endVertexDrag(this);
+          });
+
+          marker.addTo(map);
+          vertexMarkers.push(marker);
+
+          // Add to lookup map
+          vertexLookup.set(vertexObj.id, {
+            marker: marker,
+            cityId: cityId,
+            ringIdx: ringIdx,
+            vertexObj: vertexObj
+          });
+        });
+      });
+    }
+
+    function clearVertexMarkers() {
+      vertexMarkers.forEach(m => map.removeLayer(m));
+      vertexMarkers = [];
+      vertexLookup.clear();
+      // Don't clear cityVertices here - it's needed for the vertex object system
+      // Note: We don't reset vertexIdCounter to ensure IDs remain unique across sessions
+    }
+
+    // Initialize vertex objects for a city from its geometry
+    function initializeCityVertices(layer) {
+      const cityId = layer.feature.properties.id;
+      const coords = layer.feature.geometry.coordinates;
+
+      if (!cityVertices.has(cityId)) {
+        cityVertices.set(cityId, new Map());
+      }
+
+      const cityVerts = cityVertices.get(cityId);
+
+      // All geometries are now Polygons (sanitized data)
+      coords.forEach((ring, ringIdx) => {
+        const vertexObjs = ring.map(coord => ({
+          id: `v${vertexIdCounter++}`,
+          lat: coord[1],
+          lng: coord[0]
+        }));
+        cityVerts.set(ringIdx, vertexObjs);
+      });
+    }
+
+    // Build spatial index of shared vertices across all cities
+    function buildSharedVertexIndex() {
+      sharedVertices.clear();
+
+      if (!geojsonLayer) return;
+
+      geojsonLayer.eachLayer(layer => {
+        const cityId = layer.feature.properties.id;
+
+        // Get or create vertex objects for this city
+        if (!cityVertices.has(cityId)) {
+          initializeCityVertices(layer);
+        }
+
+        const cityVerts = cityVertices.get(cityId);
+        if (!cityVerts) return;
+
+        cityVerts.forEach((ringVerts, ringIdx) => {
+          ringVerts.forEach((vertexObj) => {
+            // Create a key for this coordinate (rounded to avoid floating point issues)
+            const key = `${vertexObj.lat.toFixed(7)},${vertexObj.lng.toFixed(7)}`;
+
+            if (!sharedVertices.has(key)) {
+              sharedVertices.set(key, []);
+            }
+
+            sharedVertices.get(key).push({
+              cityId: cityId,
+              cityName: layer.feature.properties.name,
+              ringIdx: ringIdx,
+              vertexId: vertexObj.id,
+              layer: layer
+            });
+          });
+        });
+      });
+
+      // Count shared vertices (appears in more than one city)
+      let sharedCount = 0;
+      sharedVertices.forEach(refs => {
+        if (refs.length > 1) sharedCount++;
+      });
+
+      console.log(`Built shared vertex index: ${sharedVertices.size} unique vertices, ${sharedCount} shared between cities`);
+    }
+
+    // Record a vertex edit in memory
+    function recordVertexEdit(vertexId, oldLatLng, newLatLng, vertexData, affectedCities, editType = 'move', preClonedState = null) {
+      if (!vertexData) {
+        console.error('Invalid vertex data in recordVertexEdit');
+        return;
+      }
+
+      // Use provided affectedCities (captured before vertex moved)
+      if (!affectedCities || affectedCities.length === 0) {
+        console.warn('No affected cities provided to recordVertexEdit');
+        return;
+      }
+
+      // Use pre-cloned state if provided (for move), otherwise clone now (for add/delete)
+      let clonedState = preClonedState;
+      if (!clonedState) {
+        clonedState = new Map();
+        affectedCities.forEach(cityRef => {
+          if (cityVertices.has(cityRef.cityId)) {
+            const cityVerts = cityVertices.get(cityRef.cityId);
+            const clonedVerts = new Map();
+            cityVerts.forEach((ringVerts, ringIdx) => {
+              clonedVerts.set(ringIdx, ringVerts.map(v => ({...v})));
+            });
+            clonedState.set(cityRef.cityId, clonedVerts);
+          }
+        });
+      }
+
+      const edit = {
+        type: editType, // 'move', 'add', or 'delete'
+        timestamp: Date.now(),
+        vertexId: vertexId,
+        primaryCityId: vertexData.cityId,
+        primaryCityName: vertexData.cityName,
+        affectedCities: affectedCities.map(ref => ({ cityId: ref.cityId, cityName: ref.cityName, vertexId: ref.vertexId })),
+        ringIdx: vertexData.ringIdx,
+        oldPosition: oldLatLng ? { lat: oldLatLng.lat, lng: oldLatLng.lng } : null,
+        newPosition: newLatLng ? { lat: newLatLng.lat, lng: newLatLng.lng } : null,
+        clonedState: clonedState // Store cloned state for undo
+      };
+
+      editHistory.push(edit);
+      updateUndoButton();
+
+      // Update all affected cities in the modified cities map
+      affectedCities.forEach(cityRef => {
+        if (!modifiedCities.has(cityRef.cityId)) {
+          modifiedCities.set(cityRef.cityId, JSON.parse(JSON.stringify(cityRef.layer.feature)));
+        }
+
+        // Sync current state
+        const modifiedFeature = modifiedCities.get(cityRef.cityId);
+        modifiedFeature.geometry.coordinates = JSON.parse(JSON.stringify(cityRef.layer.feature.geometry.coordinates));
+      });
+
+      // Update vertex data to reflect new position
+      if (newLatLng) {
+        vertexData.latLng = newLatLng;
+        if (vertexLookup.has(vertexId)) {
+          vertexLookup.get(vertexId).latLng = newLatLng;
+        }
+      }
+
+      const cityNames = affectedCities.map(ref => ref.cityName).join(', ');
+      console.log(`Edit recorded (${editType}): vertex affecting ${affectedCities.length} city/cities: ${cityNames}`);
+      console.log(`Total edits: ${editHistory.length}, Modified cities: ${modifiedCities.size}`);
+
+      // Update UI status
+      updateCommitStatus();
+    }
+
+    // Save current working state to localStorage
+    function commitChanges() {
+      if (modifiedCities.size === 0) {
+        console.log('No changes to commit');
+        return;
+      }
+
+      // Convert Map to plain object for JSON serialization
+      const modifiedCitiesObj = {};
+      modifiedCities.forEach((feature, cityId) => {
+        modifiedCitiesObj[cityId] = feature;
+      });
+
+      const commitData = {
+        modifiedCities: modifiedCitiesObj,
+        editHistory: editHistory,
+        timestamp: Date.now(),
+        snapMode: snapMode,
+        cityCount: modifiedCities.size
+      };
+
+      try {
+        localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(commitData));
+        committedChanges = commitData;
+        console.log(`✓ Committed ${modifiedCities.size} modified cities to localStorage`);
+        updateCommitStatus();
+        alert(`Committed ${modifiedCities.size} modified cities to local storage.\n\nChanges will persist across page reloads until pushed.`);
+      } catch (error) {
+        console.error('Failed to save to localStorage:', error);
+        alert('Failed to commit changes: ' + error.message);
+      }
+    }
+
+    // Load committed changes from localStorage on page load
+    function loadCommittedChanges() {
+      try {
+        const saved = localStorage.getItem(LOCALSTORAGE_KEY);
+        if (!saved) {
+          console.log('No committed changes found in localStorage');
+          return false;
+        }
+
+        const commitData = JSON.parse(saved);
+        committedChanges = commitData;
+
+        console.log(`Found committed changes from ${new Date(commitData.timestamp).toLocaleString()}`);
+        console.log(`  - ${commitData.cityCount} modified cities`);
+        console.log(`  - ${commitData.editHistory.length} edit operations`);
+
+        // Convert plain object back to Map
+        modifiedCities.clear();
+        Object.keys(commitData.modifiedCities).forEach(cityId => {
+          modifiedCities.set(parseInt(cityId), commitData.modifiedCities[cityId]);
+        });
+
+        editHistory = commitData.editHistory || [];
+
+        // Apply modified geometries to the loaded features
+        modifiedCities.forEach((modifiedFeature, cityId) => {
+          const layer = geojsonLayer.getLayers().find(l => l.feature.properties.id === cityId);
+          if (layer) {
+            // Update the layer's feature geometry
+            layer.feature.geometry.coordinates = JSON.parse(JSON.stringify(modifiedFeature.geometry.coordinates));
+            layer.setLatLngs(layer.feature.geometry.coordinates.map(r => r.map(c => [c[1], c[0]])));
+            console.log(`Applied committed changes to city ${cityId}: ${layer.feature.properties.name}`);
+          }
+        });
+
+        // Rebuild vertex structures if needed
+        buildSharedVertexIndex();
+
+        console.log(`✓ Loaded ${modifiedCities.size} committed changes from localStorage`);
+        updateCommitStatus();
+
+        // Show notification
+        alert(`Restored ${modifiedCities.size} committed cities from local storage.\n\nLast commit: ${new Date(commitData.timestamp).toLocaleString()}\n\nYou can continue editing or push these changes.`);
+
+        return true;
+      } catch (error) {
+        console.error('Failed to load from localStorage:', error);
+        alert('Failed to restore committed changes: ' + error.message);
+        return false;
+      }
+    }
+
+    // Update commit button status and status indicator
+    function updateCommitStatus() {
+      const commitBtn = document.getElementById('commitBtn');
+      const pushBtn = document.getElementById('pushBtn');
+      const statusIndicator = document.getElementById('statusIndicator');
+
+      const hasWorkingChanges = modifiedCities.size > 0;
+      const hasCommit = committedChanges !== null;
+
+      // Update commit button
+      commitBtn.disabled = !hasWorkingChanges;
+      if (hasWorkingChanges) {
+        commitBtn.textContent = `Commit (${modifiedCities.size} ${modifiedCities.size === 1 ? 'city' : 'cities'})`;
+        commitBtn.classList.add('primary');
+      } else {
+        commitBtn.textContent = 'Commit';
+        commitBtn.classList.remove('primary');
+      }
+
+      // Update push button (disabled for now, placeholder for future API)
+      pushBtn.disabled = !hasCommit;
+      if (hasCommit) {
+        pushBtn.textContent = `Push (${committedChanges.cityCount} ${committedChanges.cityCount === 1 ? 'city' : 'cities'})`;
+      } else {
+        pushBtn.textContent = 'Push';
+      }
+
+      // Update status indicator
+      statusIndicator.className = '';
+      if (hasWorkingChanges && hasCommit) {
+        statusIndicator.textContent = `Working: ${modifiedCities.size} changed | Committed: ${committedChanges.cityCount} ready`;
+        statusIndicator.classList.add('has-changes');
+      } else if (hasWorkingChanges) {
+        statusIndicator.textContent = `${modifiedCities.size} ${modifiedCities.size === 1 ? 'city' : 'cities'} modified (not committed)`;
+        statusIndicator.classList.add('has-changes');
+      } else if (hasCommit) {
+        statusIndicator.textContent = `${committedChanges.cityCount} ${committedChanges.cityCount === 1 ? 'city' : 'cities'} committed, ready to push`;
+        statusIndicator.classList.add('has-commit');
+      } else {
+        statusIndicator.textContent = 'No changes';
+      }
+    }
+
+    // Update polygon visual during drag - updates ALL cities sharing this vertex
+    function updatePolygonGeometry(marker, newLatLng, affectedCities) {
+      if (!marker || !marker._vertexData) {
+        return;
+      }
+
+      if (!newLatLng || newLatLng.lat === undefined || newLatLng.lng === undefined) {
+        return;
+      }
+
+      if (!affectedCities || affectedCities.length === 0) {
+        return;
+      }
+
+      // Update all affected cities
+      affectedCities.forEach(cityRef => {
+        try {
+          const layer = cityRef.layer;
+          if (!layer || !layer.feature || !layer.feature.geometry) {
+            console.warn('Invalid layer for city:', cityRef.cityName);
+            return;
+          }
+
+          // Update the vertex object directly (we have a reference from mousedown)
+          if (!cityRef.vertexObj) {
+            console.warn(`No vertex object reference for ${cityRef.cityName}`);
+            return;
+          }
+
+          cityRef.vertexObj.lat = newLatLng.lat;
+          cityRef.vertexObj.lng = newLatLng.lng;
+
+          // Get ringVerts to sync to geometry
+          const cityVerts = cityVertices.get(cityRef.cityId);
+          if (!cityVerts) {
+            console.warn(`No cityVerts for ${cityRef.cityName}`);
+            return;
+          }
+
+          const ringVerts = cityVerts.get(cityRef.ringIdx);
+          if (!ringVerts) {
+            console.warn(`No ringVerts for ${cityRef.cityName} ring ${cityRef.ringIdx}`);
+            return;
+          }
+
+          console.log(`Updating ${cityRef.cityName}: ${ringVerts.length} vertices in ring ${cityRef.ringIdx}`);
+
+          // Sync to geometry coordinates (all geometries are now Polygons)
+          const coords = layer.feature.geometry.coordinates;
+          coords[cityRef.ringIdx] = ringVerts.map(v => [v.lng, v.lat]);
+
+          // Convert to Leaflet format and update layer directly (more efficient)
+          const newLatLngs = coords.map(ring =>
+            ring.map(coord => [coord[1], coord[0]]) // Convert [lng,lat] to [lat,lng]
+          );
+
+          // Update layer geometry without removing from map (reduces flicker)
+          layer.setLatLngs(newLatLngs);
+        } catch (err) {
+          console.error('Error updating polygon for', cityRef.cityName, ':', err);
+        }
+      });
+    }
+
+    // Monitor zoom level for edit mode
+    map.on('zoomend', () => {
+      const zoom = map.getZoom();
+
+      // Enable/disable edit mode checkbox based on zoom
+      if (zoom < MIN_EDIT_ZOOM) {
+        editModeCheckbox.disabled = true;
+        editModeLabel.classList.add('disabled');
+        // Auto-disable edit mode if zoomed out
+        if (editModeEnabled) {
+          console.log(`Zoom ${zoom} - auto-disabling edit mode`);
+          editModeCheckbox.checked = false;
+          editModeEnabled = false;
+          snapRadios.forEach(radio => radio.disabled = true);
+          snapModeLabel.classList.add('disabled');
+          editModeNotice.style.display = 'none';
+          clearVertexMarkers();
+        }
+      } else {
+        editModeCheckbox.disabled = false;
+        editModeLabel.classList.remove('disabled');
+        // Show vertex markers for selected city if in edit mode
+        if (editModeEnabled && selectedCityLayer) {
+          console.log(`Zoom ${zoom} - showing vertices for selected city`);
+          showVertexMarkers(selectedCityLayer);
+        }
+      }
+    });
+
+    // Load country borders from Natural Earth
+    fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json')
+      .then(res => res.json())
+      .then(topo => {
+        const countries = topojson.feature(topo, topo.objects.countries);
+        countriesLayer = L.geoJSON(countries, {
+          style: {
+            fillColor: 'transparent',
+            weight: 3,
+            opacity: 0.8,
+            color: '#333',
+            fillOpacity: 0
+          },
+          interactive: false // Don't interfere with city clicks
+        }).addTo(map);
+
+        // Adjust city layer opacity when countries are shown
+        if (geojsonLayer && showCountriesCheckbox.checked) {
+          geojsonLayer.setStyle({ fillOpacity: 0.5, opacity: 0.8 });
+        }
+        console.log('Country borders loaded');
+      })
+      .catch(err => {
+        console.error('Failed to load country borders:', err);
+      });
+
+    // Load TopoJSON and convert to GeoJSON for Leaflet
+    fetch('cities_sanitized.topojson')
+      .then(res => res.json())
+      .then(topo => {
+        const data = topojson.feature(topo, topo.objects.cities);
+        if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
+          document.getElementById('loading').textContent = 'Error: Invalid TopoJSON (missing objects.cities)';
+          return;
+        }
+        document.getElementById('loading').style.display = 'none';
+        allFeatures = data.features;
+
+        geojsonLayer = L.geoJSON(data, {
+          style: style,
+          onEachFeature: onEachFeature
+        }).addTo(map);
+        // Keep initial view (Western Europe) instead of auto-zooming to data bounds
+
+        // Build shared vertex index for topology tracking
+        buildSharedVertexIndex();
+
+        // Load any committed changes from localStorage
+        loadCommittedChanges();
+
+        // Stats
+        const totalPop = allFeatures.reduce((sum, f) => sum + f.properties.population, 0);
+        const avgVertices = Math.round(allFeatures.reduce((sum, f) => sum + countVertices(f), 0) / allFeatures.length);
+
+        document.getElementById('stats').innerHTML = `
+          <strong>Statistics:</strong><br>
+          Cities: ${allFeatures.length.toLocaleString()}<br>
+          Total Pop: ${totalPop.toLocaleString()}<br>
+          Avg Vertices: ${avgVertices}
+        `;
+      })
+      .catch(err => {
+        document.getElementById('loading').textContent = 'Error loading data: ' + err.message;
+      });
+
+    // Edit mode radio buttons
+    const editActionRadios = document.querySelectorAll('input[name="editAction"]');
+
+    editActionRadios.forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        currentEditAction = e.target.value;
+        updateMapCursor();
+        console.log('Edit action changed to:', currentEditAction);
+      });
+    });
+
+    function updateMapCursor() {
+      const mapDiv = document.getElementById('map');
+      mapDiv.classList.remove('edit-mode', 'add-mode', 'delete-mode');
+
+      if (currentEditAction === 'edit') {
+        mapDiv.classList.add('edit-mode');
+      } else if (currentEditAction === 'add') {
+        mapDiv.classList.add('add-mode');
+      } else if (currentEditAction === 'delete') {
+        mapDiv.classList.add('delete-mode');
+      }
+    }
+
+    // Add vertex to polygon edge
+    function addVertex(latLng, layer) {
+      if (!layer || !layer.feature) return;
+
+      const cityId = layer.feature.properties.id;
+      const cityName = layer.feature.properties.name;
+      const coords = layer.feature.geometry.coordinates;
+
+      // Get vertex objects for this city
+      const cityVerts = cityVertices.get(cityId);
+      if (!cityVerts) return;
+
+      const ringVerts = cityVerts.get(0); // Outer ring
+      if (!ringVerts) return;
+
+      // Find closest edge to click point (in screen pixels for accuracy)
+      const clickPoint = map.latLngToContainerPoint(latLng);
+      let closestSegmentIdx = 0;
+      let minDistance = Infinity;
+
+      for (let i = 0; i < ringVerts.length - 1; i++) {
+        const p1 = map.latLngToContainerPoint([ringVerts[i].lat, ringVerts[i].lng]);
+        const p2 = map.latLngToContainerPoint([ringVerts[i + 1].lat, ringVerts[i + 1].lng]);
+
+        const closest = closestPointOnSegment(clickPoint, p1, p2);
+        const dist = Math.sqrt(
+          Math.pow(clickPoint.x - closest.x, 2) +
+          Math.pow(clickPoint.y - closest.y, 2)
+        );
+
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestSegmentIdx = i;
+        }
+      }
+
+      // Create new vertex object
+      const newVertexId = `v${vertexIdCounter++}`;
+      const newVertex = {
+        id: newVertexId,
+        lat: latLng.lat,
+        lng: latLng.lng
+      };
+
+      // Insert after closestSegmentIdx
+      const insertIdx = closestSegmentIdx + 1;
+      ringVerts.splice(insertIdx, 0, newVertex);
+
+      // Sync to geometry
+      coords[0] = ringVerts.map(v => [v.lng, v.lat]);
+
+      // Find all cities that share this edge and add vertex to them too
+      const lookupKey = `${latLng.lat.toFixed(7)},${latLng.lng.toFixed(7)}`;
+      const v1 = ringVerts[closestSegmentIdx];
+      const v2 = ringVerts[closestSegmentIdx + 2]; // +2 because we just inserted
+
+      const v1Key = `${v1.lat.toFixed(7)},${v1.lng.toFixed(7)}`;
+      const v2Key = `${v2.lat.toFixed(7)},${v2.lng.toFixed(7)}`;
+
+      const v1Cities = sharedVertices.get(v1Key) || [];
+      const v2Cities = sharedVertices.get(v2Key) || [];
+
+      // Find cities that have both v1 and v2 (share this edge)
+      const borderingCities = new Set();
+      v1Cities.forEach(city1 => {
+        v2Cities.forEach(city2 => {
+          if (city1.cityId === city2.cityId && city1.cityId !== cityId) {
+            borderingCities.add(city1.cityId);
+          }
+        });
+      });
+
+      // Add vertex to bordering cities
+      borderingCities.forEach(borderCityId => {
+        const borderLayer = geojsonLayer.getLayers().find(l => l.feature.properties.id === borderCityId);
+        if (!borderLayer) return;
+
+        const borderVerts = cityVertices.get(borderCityId);
+        if (!borderVerts) return;
+
+        // Find the matching edge in the bordering city
+        borderVerts.forEach((borderRingVerts, ringIdx) => {
+          for (let i = 0; i < borderRingVerts.length - 1; i++) {
+            const bv1 = borderRingVerts[i];
+            const bv2 = borderRingVerts[i + 1];
+
+            const bv1Key = `${bv1.lat.toFixed(7)},${bv1.lng.toFixed(7)}`;
+            const bv2Key = `${bv2.lat.toFixed(7)},${bv2.lng.toFixed(7)}`;
+
+            // Check if this edge matches (same vertices, possibly reversed)
+            if ((bv1Key === v1Key && bv2Key === v2Key) || (bv1Key === v2Key && bv2Key === v1Key)) {
+              // Insert the same vertex (shared reference)
+              borderRingVerts.splice(i + 1, 0, newVertex);
+
+              // Sync to geometry (all geometries are now Polygons)
+              const borderCoords = borderLayer.feature.geometry.coordinates;
+              borderCoords[ringIdx] = borderRingVerts.map(v => [v.lng, v.lat]);
+
+              // Update visual
+              const newLatLngs = borderCoords.map(r => r.map(c => [c[1], c[0]]));
+              map.removeLayer(borderLayer);
+              borderLayer.setLatLngs(newLatLngs);
+              borderLayer.addTo(map);
+
+              break;
+            }
+          }
+        });
+      });
+
+      // Update this city's visual
+      const newLatLngs = coords.map(ring => ring.map(coord => [coord[1], coord[0]]));
+      map.removeLayer(layer);
+      layer.setLatLngs(newLatLngs);
+      layer.addTo(map);
+
+      // Rebuild shared vertex index to include new vertex
+      buildSharedVertexIndex();
+
+      // Record the edit
+      const vertexData = {
+        cityId: cityId,
+        cityName: cityName,
+        ringIdx: 0,
+        vertexObj: newVertex,
+        latLng: latLng,
+        lookupKey: lookupKey
+      };
+
+      // Create affectedCities array from borderingCities
+      const affectedCitiesForAdd = [{
+        cityId: cityId,
+        cityName: cityName,
+        ringIdx: 0,
+        layer: layer
+      }];
+
+      borderingCities.forEach(cityId => {
+        const borderingLayer = geojsonLayer.getLayers().find(l => l.feature.properties.id === cityId);
+        if (borderingLayer) {
+          affectedCitiesForAdd.push({
+            cityId: cityId,
+            cityName: borderingLayer.feature.properties.name,
+            ringIdx: 0,  // We don't track the exact ring, but it's stored in allAffectedCities
+            layer: borderingLayer
+          });
+        }
+      });
+
+      recordVertexEdit(newVertexId, null, latLng, vertexData, affectedCitiesForAdd, 'add');
+
+      // Rebuild vertex markers
+      showVertexMarkers(layer);
+
+      const affectedCount = borderingCities.size + 1;
+      console.log(`Added vertex to ${affectedCount} city/cities (including ${borderingCities.size} bordering)`);
+    }
+
+    // Delete vertex from polygon
+    function deleteVertex(marker) {
+      if (!marker || !marker._vertexData) return;
+
+      const vertexData = marker._vertexData;
+      const lookupKey = vertexData.lookupKey;
+      const affectedCities = sharedVertices.get(lookupKey) || [];
+
+      // Check minimum vertices for all affected cities
+      for (const cityRef of affectedCities) {
+        const cityVerts = cityVertices.get(cityRef.cityId);
+        if (!cityVerts) continue;
+
+        const ringVerts = cityVerts.get(cityRef.ringIdx);
+        if (ringVerts && ringVerts.length <= 4) { // 4 because first and last are same
+          alert(`Cannot delete vertex: polygon for ${cityRef.cityName} would have fewer than 3 vertices.`);
+          return;
+        }
+      }
+
+      // Clone state NOW before any deletions for undo
+      const clonedStateBeforeDelete = new Map();
+      affectedCities.forEach(cityRef => {
+        if (cityVertices.has(cityRef.cityId)) {
+          const cityVerts = cityVertices.get(cityRef.cityId);
+          const clonedVerts = new Map();
+          cityVerts.forEach((ringVerts, ringIdx) => {
+            clonedVerts.set(ringIdx, ringVerts.map(v => ({...v})));
+          });
+          clonedStateBeforeDelete.set(cityRef.cityId, clonedVerts);
+        }
+      });
+
+      // Delete from all affected cities
+      affectedCities.forEach(cityRef => {
+        const layer = cityRef.layer;
+        const cityVerts = cityVertices.get(cityRef.cityId);
+        if (!cityVerts) return;
+
+        const ringVerts = cityVerts.get(cityRef.ringIdx);
+        if (!ringVerts) return;
+
+        // Find and remove the vertex by ID
+        const vertexIdx = ringVerts.findIndex(v => v.id === cityRef.vertexId);
+        if (vertexIdx === -1) {
+          console.warn(`Vertex ${cityRef.vertexId} not found in ${cityRef.cityName}`);
+          return;
+        }
+
+        ringVerts.splice(vertexIdx, 1);
+
+        // Sync to geometry (all geometries are now Polygons)
+        const coords = layer.feature.geometry.coordinates;
+        coords[cityRef.ringIdx] = ringVerts.map(v => [v.lng, v.lat]);
+
+        // Update visual
+        const newLatLngs = coords.map(r => r.map(c => [c[1], c[0]]));
+        map.removeLayer(layer);
+        layer.setLatLngs(newLatLngs);
+        layer.addTo(map);
+      });
+
+      // Record the edit BEFORE rebuilding index (pass pre-captured state)
+      recordVertexEdit(marker._vertexId, vertexData.latLng, null, vertexData, affectedCities, 'delete', clonedStateBeforeDelete);
+
+      // Rebuild shared vertex index
+      buildSharedVertexIndex();
+
+      // Rebuild vertex markers for selected city to update lookupKeys
+      if (selectedCityLayer) {
+        showVertexMarkers(selectedCityLayer);
+      }
+
+      console.log(`Deleted vertex from ${affectedCities.length} city/cities`);
+    }
+
+    // Snap to nearest feature (country border or adjacent city edge/vertex)
+    // snapLock: { snapInfo, snapLatLng } - if provided, reuse this snap unless user moves far from it
+    function snapToNearestFeature(latLng, snapLock = null) {
+      const VERTEX_SNAP_THRESHOLD_PX = 42;  // Stronger pull for vertices (reduced 30%)
+      const EDGE_SNAP_THRESHOLD_PX = 35;    // Weaker pull for edges (reduced 30%)
+      const SNAP_LOCK_BREAK_DISTANCE_PX = 56; // Distance to move to break snap lock (reduced 30%)
+
+      // Convert lat/lng to screen pixels
+      const point = map.latLngToContainerPoint(latLng);
+
+      // If we have a snap lock, check if user moved far enough to break it
+      if (snapLock) {
+        const lockPoint = map.latLngToContainerPoint(snapLock.snapLatLng);
+        const distFromLock = Math.sqrt(
+          Math.pow(point.x - lockPoint.x, 2) +
+          Math.pow(point.y - lockPoint.y, 2)
+        );
+
+        if (distFromLock < SNAP_LOCK_BREAK_DISTANCE_PX) {
+          // Still within lock range - return locked snap
+          return snapLock.snapLatLng;
+        }
+        // User moved far enough - break the lock and search for new snap
+      }
+
+      let closestPoint = null;
+      let minDistance = EDGE_SNAP_THRESHOLD_PX;
+      let snapInfo = null; // Store info about what we're snapping to
+
+      if (snapMode === 'borders' && countriesLayer && map.hasLayer(countriesLayer)) {
+        // Check country borders only
+        countriesLayer.eachLayer(layer => {
+          const coords = layer.feature.geometry.coordinates;
+          const geomType = layer.feature.geometry.type;
+
+          const processRing = (ring) => {
+            for (let i = 0; i < ring.length - 1; i++) {
+              const p1 = map.latLngToContainerPoint([ring[i][1], ring[i][0]]);
+              const p2 = map.latLngToContainerPoint([ring[i + 1][1], ring[i + 1][0]]);
+
+              const closest = closestPointOnSegment(point, p1, p2);
+              const dist = Math.sqrt(Math.pow(point.x - closest.x, 2) + Math.pow(point.y - closest.y, 2));
+
+              if (dist < minDistance) {
+                minDistance = dist;
+                closestPoint = map.containerPointToLatLng(closest);
+                snapInfo = { type: 'border' };
+              }
+            }
+          };
+
+          if (geomType === 'Polygon') {
+            coords.forEach(ring => processRing(ring));
+          } else if (geomType === 'MultiPolygon') {
+            coords.forEach(polygon => polygon.forEach(ring => processRing(ring)));
+          }
+        });
+      } else if (snapMode === 'cities' && geojsonLayer && selectedCityLayer) {
+        // Check city polygons (excluding the selected city)
+        const selectedCityId = selectedCityLayer.feature.properties.id;
+
+        // Spatial optimization: only check cities within a reasonable pixel radius
+        const SEARCH_RADIUS_PX = Math.max(VERTEX_SNAP_THRESHOLD_PX, EDGE_SNAP_THRESHOLD_PX) * 3;
+        const searchBounds = L.latLngBounds(
+          map.containerPointToLatLng([point.x - SEARCH_RADIUS_PX, point.y - SEARCH_RADIUS_PX]),
+          map.containerPointToLatLng([point.x + SEARCH_RADIUS_PX, point.y + SEARCH_RADIUS_PX])
+        );
+
+        // Collect nearby cities first (spatial filter)
+        const nearbyCities = [];
+        geojsonLayer.eachLayer(layer => {
+          if (layer.feature.properties.id === selectedCityId) return;
+          if (layer.getBounds().intersects(searchBounds)) {
+            nearbyCities.push(layer);
+          }
+        });
+
+        // Phase 1: Check for vertex snaps in nearby cities only
+        for (const layer of nearbyCities) {
+          const cityId = layer.feature.properties.id;
+          const cityVerts = cityVertices.get(cityId);
+          if (!cityVerts) continue;
+
+          cityVerts.forEach((ringVerts, ringIdx) => {
+            for (const vertexObj of ringVerts) {
+              const vPoint = map.latLngToContainerPoint([vertexObj.lat, vertexObj.lng]);
+              const dist = Math.sqrt(Math.pow(point.x - vPoint.x, 2) + Math.pow(point.y - vPoint.y, 2));
+
+              if (dist < VERTEX_SNAP_THRESHOLD_PX && dist < minDistance) {
+                minDistance = dist;
+                closestPoint = L.latLng(vertexObj.lat, vertexObj.lng);
+                snapInfo = {
+                  type: 'vertex',
+                  cityId: cityId,
+                  cityName: layer.feature.properties.name,
+                  ringIdx: ringIdx,
+                  vertexObj: vertexObj,
+                  layer: layer
+                };
+              }
+            }
+          });
+        }
+
+        // Phase 2: Check for edge snaps in nearby cities if no vertex snap found
+        if (!snapInfo || snapInfo.type !== 'vertex') {
+          for (const layer of nearbyCities) {
+            const cityId = layer.feature.properties.id;
+            const cityVerts = cityVertices.get(cityId);
+            if (!cityVerts) continue;
+
+            cityVerts.forEach((ringVerts, ringIdx) => {
+              for (let i = 0; i < ringVerts.length - 1; i++) {
+                const v1 = ringVerts[i];
+                const v2 = ringVerts[i + 1];
+
+                const p1 = map.latLngToContainerPoint([v1.lat, v1.lng]);
+                const p2 = map.latLngToContainerPoint([v2.lat, v2.lng]);
+
+                const closest = closestPointOnSegment(point, p1, p2);
+                const dist = Math.sqrt(Math.pow(point.x - closest.x, 2) + Math.pow(point.y - closest.y, 2));
+
+                if (dist < EDGE_SNAP_THRESHOLD_PX && dist < minDistance) {
+                  minDistance = dist;
+                  closestPoint = map.containerPointToLatLng(closest);
+                  snapInfo = {
+                    type: 'edge',
+                    cityId: cityId,
+                    cityName: layer.feature.properties.name,
+                    ringIdx: ringIdx,
+                    edgeStartIdx: i,
+                    edgeEndIdx: i + 1,
+                    layer: layer
+                  };
+                }
+              }
+            });
+          }
+        }
+      }
+
+      // Store snap info for later use (e.g., to add vertex to target polygon)
+      if (closestPoint && snapInfo) {
+        closestPoint._snapInfo = snapInfo;
+      }
+
+      // Return snapped point if found, otherwise original
+      return closestPoint || latLng;
+    }
+
+    // Helper: find closest point on line segment
+    function closestPointOnSegment(p, a, b) {
+      const atob = { x: b.x - a.x, y: b.y - a.y };
+      const atop = { x: p.x - a.x, y: p.y - a.y };
+      const len = atob.x * atob.x + atob.y * atob.y;
+      let dot = atop.x * atob.x + atop.y * atob.y;
+      const t = Math.min(1, Math.max(0, dot / len));
+
+      return {
+        x: a.x + atob.x * t,
+        y: a.y + atob.y * t
+      };
+    }
+
+    // Undo last add/delete/move operation
+    function undoLastOperation() {
+      if (editHistory.length === 0) {
+        console.log('No operations to undo');
+        return;
+      }
+
+      const operation = editHistory[editHistory.length - 1];
+
+      // Check if already undone
+      if (operation._undone) {
+        console.log('Operation already undone');
+        return;
+      }
+
+      console.log(`Undoing ${operation.type} operation from ${new Date(operation.timestamp).toLocaleTimeString()}`);
+
+      // Restore cloned state for all affected cities
+      if (operation.clonedState) {
+        operation.clonedState.forEach((clonedVerts, cityId) => {
+          // Restore the vertex objects
+          cityVertices.set(cityId, clonedVerts);
+
+          // Update the layer geometry
+          const layer = geojsonLayer.getLayers().find(l => l.feature.properties.id === cityId);
+          if (!layer) {
+            console.warn(`Layer not found for city ${cityId}`);
+            return;
+          }
+
+          const coords = layer.feature.geometry.coordinates;
+
+          // All geometries are now Polygons (sanitized data)
+          // Update coordinates from cloned vertex objects
+          clonedVerts.forEach((ringVerts, ringIdx) => {
+            coords[ringIdx] = ringVerts.map(v => [v.lng, v.lat]);
+          });
+
+          // Convert to Leaflet format [lat, lng]
+          const newLatLngs = coords.map(r => r.map(c => [c[1], c[0]]));
+
+          // Force re-render
+          const wasOnMap = map.hasLayer(layer);
+          if (wasOnMap) {
+            map.removeLayer(layer);
+          }
+          layer.setLatLngs(newLatLngs);
+          if (wasOnMap) {
+            layer.addTo(map);
+          }
+
+          console.log(`Restored Polygon for city ${cityId}`);
+        });
+      }
+
+      // Mark operation as undone (don't remove from history)
+      operation._undone = true;
+
+      // Rebuild shared vertex index
+      buildSharedVertexIndex();
+
+      // Rebuild vertex markers if a city is selected
+      if (selectedCityLayer) {
+        showVertexMarkers(selectedCityLayer);
+      }
+
+      updateUndoButton();
+      updateCommitStatus();
+
+      console.log('Undo complete - state restored from clone');
+    }
+
+    // Reset all changes
+    function resetAllChanges() {
+      const hasWorkingChanges = modifiedCities.size > 0;
+      const hasCommit = committedChanges !== null;
+
+      let message = 'Reset all changes and reload original data?';
+      if (hasCommit && hasWorkingChanges) {
+        message = 'This will discard:\n- Working changes (' + modifiedCities.size + ' cities)\n- Committed changes (' + committedChanges.cityCount + ' cities)\n\nContinue?';
+      } else if (hasCommit) {
+        message = 'This will discard committed changes (' + committedChanges.cityCount + ' cities). Continue?';
+      } else if (hasWorkingChanges) {
+        message = 'Discard working changes (' + modifiedCities.size + ' cities)?';
+      }
+
+      if (!confirm(message)) {
+        return;
+      }
+
+      console.log('Resetting all changes...');
+
+      // Clear edit tracking
+      editHistory = [];
+      modifiedCities.clear();
+      cityVertices.clear();
+
+      // Clear localStorage
+      localStorage.removeItem(LOCALSTORAGE_KEY);
+      committedChanges = null;
+
+      // Reload TopoJSON
+      fetch('cities_sanitized.topojson')
+        .then(res => res.json())
+        .then(topo => {
+          const data = topojson.feature(topo, topo.objects.cities);
+          allFeatures = data.features;
+
+          // Remove old layer
+          if (geojsonLayer) {
+            map.removeLayer(geojsonLayer);
+          }
+
+          // Add new layer
+          geojsonLayer = L.geoJSON(data, {
+            style: style,
+            onEachFeature: onEachFeature
+          }).addTo(map);
+
+          // Rebuild shared vertex index
+          buildSharedVertexIndex();
+
+          // Clear vertex markers
+          clearVertexMarkers();
+          selectedCityLayer = null;
+
+          updateUndoButton();
+          updateCommitStatus();
+
+          console.log('Reset complete');
+        })
+        .catch(err => {
+          console.error('Failed to reload data:', err);
+          alert('Failed to reload data: ' + err.message);
+        });
+    }
+
+    // Update undo button state and text
+    function updateUndoButton() {
+      const undoBtn = document.getElementById('undoBtn');
+
+      // Find last operation (add, delete, or move)
+      const lastOp = editHistory.length > 0 ? editHistory[editHistory.length - 1] : null;
+
+      if (lastOp && !lastOp._undone) {
+        undoBtn.disabled = false;
+        const opText = lastOp.type === 'add' ? 'Add' : lastOp.type === 'delete' ? 'Delete' : 'Move';
+        undoBtn.textContent = `Undo ${opText}`;
+      } else {
+        undoBtn.disabled = true;
+        undoBtn.textContent = 'Undo';
+      }
+    }
+
+    // Event listeners for undo and reset buttons
+    document.getElementById('undoBtn').addEventListener('click', undoLastOperation);
+    document.getElementById('resetBtn').addEventListener('click', resetAllChanges);
+
+    // Event listeners for commit and push buttons
+    document.getElementById('commitBtn').addEventListener('click', commitChanges);
+    document.getElementById('pushBtn').addEventListener('click', () => {
+      alert('Push to server not yet implemented.\n\nThis will send your committed changes to the API and regenerate tiles.');
+    });
+
+    // Initialize commit status
+    updateCommitStatus();
+
+    // Add vertex mode: click on polygon edge
+    map.on('click', function(e) {
+      if (currentEditAction === 'add' && selectedCityLayer && editModeEnabled) {
+        addVertex(e.latlng, selectedCityLayer);
+      }
+    });
+
+    // Initialize cursor
+    updateMapCursor();
+
+  </script>
+</body>
+</html>

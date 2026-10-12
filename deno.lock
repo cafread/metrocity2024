@@ -1,0 +1,53 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@gfx/canvas-wasm@*": "0.4.2",
+    "jsr:@std/encoding@1.0.5": "1.0.5",
+    "npm:topojson-client@3.1.0": "3.1.0",
+    "npm:topojson-server@3.0.1": "3.0.1",
+    "npm:topojson-simplify@3.0.3": "3.0.3"
+  },
+  "jsr": {
+    "@gfx/canvas-wasm@0.4.2": {
+      "integrity": "d653be3bd12cb2fa9bbe5d1b1f041a81b91d80b68502761204aaf60e4592532a",
+      "dependencies": [
+        "jsr:@std/encoding"
+      ]
+    },
+    "@std/encoding@1.0.5": {
+      "integrity": "ecf363d4fc25bd85bd915ff6733a7e79b67e0e7806334af15f4645c569fefc04"
+    }
+  },
+  "npm": {
+    "commander@2.20.3": {
+      "integrity": "sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ=="
+    },
+    "topojson-client@3.1.0": {
+      "integrity": "sha512-605uxS6bcYxGXw9qi62XyrV6Q3xwbndjachmNxu8HWTtVPxZfEJN9fd/SZS1Q54Sn2y0TMyMxFj/cJINqGHrKw==",
+      "dependencies": [
+        "commander"
+      ],
+      "bin": true
+    },
+    "topojson-server@3.0.1": {
+      "integrity": "sha512-/VS9j/ffKr2XAOjlZ9CgyyeLmgJ9dMwq6Y0YEON8O7p/tGGk+dCWnrE03zEdu7i4L7YsFZLEPZPzCvcB7lEEXw==",
+      "dependencies": [
+        "commander"
+      ],
+      "bin": true
+    },
+    "topojson-simplify@3.0.3": {
+      "integrity": "sha512-V+pBjLVzSQ3+hSOxBiV01OVXgFiCmMO8ia3huxKEyIMTC1ApQHBcdXdOqcQ6U2JJJD31TZduwY6KyF15R8sUgg==",
+      "dependencies": [
+        "commander",
+        "topojson-client"
+      ],
+      "bin": true
+    }
+  },
+  "remote": {
+    "https://deno.land/std@0.224.0/assert/assert_exists.ts": "43420cf7f956748ae6ed1230646567b3593cb7a36c5a5327269279c870c5ddfd",
+    "https://deno.land/std@0.224.0/assert/assertion_error.ts": "ba8752bd27ebc51f723702fac2f54d3e94447598f54264a6653d6413738a8917",
+    "https://deno.land/std@0.224.0/flags/mod.ts": "88553267f34519c8982212185339efdb2d2e62c159ec558f47eb50c8952a6be3"
+  }
+}

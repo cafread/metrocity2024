@@ -8,3 +8,24 @@ Generally speaking, someone travelling to New York City does not want to see the
 Generated tiles were put through png gauntlet to further minimise their size and make what is very complex under the hood as responsive as possible.
 
 Zoom isn't possible as implemented - it would make the tileset much larger and was chosen to be appropriate for the task.  The output from this is intended to show what people feel is right, not to define boundaries accurate to within a few metres.  All processing is done in browser, so limits are also necessary out of respect for the end user.
+
+## TopoJSON pipeline (experimental)
+
+Work in progress to replace the PNG tiles with one TopoJSON file, so that neighbouring cities share boundary arcs and an edit to a border moves both sides.
+
+The scripts run on [Deno](https://deno.com/):
+
+1. `tiles_to_topojson.ts` traces `tiles/*.png` into `cities.geojson` (3,721 cities, about 29 MB). It needs a large heap: `deno run --allow-read --allow-write --v8-flags=--max-old-space-size=16384 tiles_to_topojson.ts`
+2. `topofy.ts` quantises and simplifies that into `cities.topojson`: `deno run --allow-read --allow-write topofy.ts`
+3. `sanitise_multipolygons.ts` keeps the largest polygon of each city: `deno run --allow-read --allow-write sanitise_multipolygons.ts cities.topojson cities_sanitized.topojson`
+
+Only `cities_sanitized.topojson` is committed; the two intermediate files are ignored and can be rebuilt with the steps above.
+
+`viewer.html` is a Leaflet editor for `cities_sanitized.topojson`. It fetches the file, so it needs a local web server, for example `deno run --allow-net --allow-read jsr:@std/http/file-server --port 4507` and then http://localhost:4507/viewer.html.
+
+Known gaps:
+
+- The tracer writes a hole (an enclave of another city, or unpainted pixels) as a separate filled polygon instead of an interior ring. 69 cities are affected, and step 3 then drops those rings, which fills the hole.
+- The viewer saves edits to the browser's localStorage only. There is no export and the Push button is a stub.
+
+`AGENTS_HISTORY.md` and `agent_plans.md` are the logs kept by the AI agents that wrote this, including the remaining plans.
