@@ -61,6 +61,7 @@
     #results { max-height: 220px; overflow-y: auto; }
     .result-item { padding: 6px 8px; cursor: pointer; border-bottom: 1px solid #ddd; }
     .result-item:hover { background: #e0e0e0; }
+    .result-item.active { background: #cfe2ff; }
     .result-item.blocked { color: #999; cursor: not-allowed; }
     .result-item.blocked:hover { background: none; }
     #placeResults { max-height: 200px; overflow-y: auto; margin-bottom: 6px; }
@@ -362,6 +363,11 @@
       return { id, name: p.name, population: p.population, lat: p.lat, lon: p.lon, coordinates: clone(layer.feature.geometry.coordinates) };
     }
 
+    // Two snapshots describe the same city state. Compared field by field: the order of keys
+    // and a centre that is missing in older saved edits must not make a city look changed.
+    const stateKey = snap => (snap ? JSON.stringify([snap.name, snap.population, snap.lat ?? null, snap.lon ?? null, snap.coordinates]) : 'none');
+    const sameState = (a, b) => stateKey(a) === stateKey(b);
+
     function capture(ids) {
       const out = {};
       ids.forEach(id => { out[id] = snapshot(id); });
@@ -406,7 +412,7 @@
       Object.keys(before).forEach(key => {
         const id = Number(key);
         const after = snapshot(id);
-        if (JSON.stringify(before[key]) === JSON.stringify(after)) return;
+        if (sameState(before[key], after)) return;
         op.before[id] = before[key];
         op.after[id] = after;
         if (!baseline.has(id)) baseline.set(id, before[key]);
@@ -447,7 +453,7 @@
     }
 
     function isDirty(id) {
-      return JSON.stringify(baseline.get(id)) !== JSON.stringify(snapshot(id));
+      return !sameState(baseline.get(id), snapshot(id));
     }
 
     function dirtyIds() {
@@ -485,7 +491,7 @@
       if (!baseline.has(id) || !isDirty(id)) return false;
       const file = committed.has(id) ? committed.get(id).file : baseline.get(id);
       const state = snapshot(id);
-      if (JSON.stringify(state) === JSON.stringify(file)) committed.delete(id); // back to what the file has
+      if (sameState(state, file)) committed.delete(id); // back to what the file has
       else committed.set(id, { file, state, by: user, at: new Date().toISOString(), pushed: null });
       baseline.set(id, state);
       return true;
@@ -1032,6 +1038,7 @@
       if (!place) return;
       $('placeResults').innerHTML = '';
       $('placeSearch').value = place.name;
+      $('drawBtn').focus();
       // Show where GeoNames puts the place, as a guide for the outline
       const at = wrapIn([place.lng, place.lat]);
       placeMarker = L.circleMarker([at[1], at[0]], { radius: 7, color: '#1565c0', weight: 3, fillColor: '#ffffff', fillOpacity: 1, interactive: false }).addTo(map);
@@ -1326,6 +1333,28 @@
       map.fitBounds(cities.get(id).getBounds());
     });
 
+    // From a search box, Down and Up move through the rows that can be picked and Enter picks
+    // the highlighted one, or the first when none is highlighted
+    function listNavigation(input, list) {
+      input.addEventListener('keydown', e => {
+        if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return;
+        const items = Array.from(list.querySelectorAll('.result-item:not(.blocked)'));
+        if (items.length === 0) return;
+        e.preventDefault();
+        const at = items.findIndex(item => item.classList.contains('active'));
+        if (e.key === 'Enter') {
+          (items[at] || items[0]).click();
+          return;
+        }
+        const next = e.key === 'ArrowDown' ? (at + 1) % items.length : (at <= 0 ? items.length - 1 : at - 1);
+        items.forEach(item => item.classList.remove('active'));
+        items[next].classList.add('active');
+        items[next].scrollIntoView({ block: 'nearest' });
+      });
+    }
+    listNavigation($('search'), $('results'));
+    listNavigation($('placeSearch'), $('placeResults'));
+
     $('editMode').addEventListener('change', e => {
       editMode = e.target.checked;
       $('editTools').style.display = editMode ? 'block' : 'none';
@@ -1415,7 +1444,7 @@
         changes: ids.map(id => {
           const file = committed.has(id) ? committed.get(id).file : baseline.get(id);
           const now = snapshot(id);
-          if (JSON.stringify(file) === JSON.stringify(now)) return null;
+          if (sameState(file, now)) return null;
           return changeEntry(id, file, now, { status: isDirty(id) ? 'pending' : 'committed' });
         }).filter(Boolean)
       };
