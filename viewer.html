@@ -224,9 +224,15 @@
       return { lat: 48.8, lng: 2.3, zoom: 6 }; // Western Europe
     }
     const startView = loadView();
-    // One world only: no repeated continents either side of the antimeridian, where there are
-    // no city polygons or borders to show
-    const WORLD = [[-85.0511, -180], [85.0511, 180]];
+    // One world only, with no repeated continents. The map is cut at CUT_LNG instead of the
+    // antimeridian: just west of mainland Alaska, in the Bering Strait, so Russia is in one
+    // piece. No city polygon crosses this longitude. Inside the page, anything west of the cut
+    // has 360 added to its longitude (wrapIn); files and exports keep -180 to 180 (wrapOut).
+    const CUT_LNG = -168.5;
+    const WORLD = [[-85.0511, CUT_LNG], [85.0511, CUT_LNG + 360]];
+    const wrapIn = c => (c[0] < CUT_LNG ? [c[0] + 360, c[1]] : [c[0], c[1]]);
+    const wrapOut = c => (c[0] > 180 ? [c[0] - 360, c[1]] : [c[0], c[1]]);
+    const wrapRings = (coords, wrap) => coords.map(ring => ring.map(wrap));
     const map = L.map('map', { maxBounds: WORLD, maxBoundsViscosity: 1 });
     // Smallest zoom at which the world is at least as wide as the map (256 px at zoom 0)
     const fitMinZoom = () => map.setMinZoom(Math.max(0, Math.ceil(Math.log2(map.getSize().x / 256))));
@@ -240,9 +246,7 @@
 
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19,
-      noWrap: true,
-      bounds: WORLD
+      maxZoom: 19
     }).addTo(map);
 
     // Color by population
@@ -471,8 +475,10 @@
       if (!saved || !saved.changes) return;
       Object.keys(saved.changes).forEach(key => {
         const id = Number(key);
-        originals.set(id, saved.changes[key].original);
-        applySnapshot(id, saved.changes[key].current);
+        const { original, current } = saved.changes[key];
+        [original, current].forEach(snap => { if (snap) snap.coordinates = wrapRings(snap.coordinates, wrapIn); });
+        originals.set(id, original);
+        applySnapshot(id, current);
       });
       const count = Object.keys(saved.changes).length;
       setStatus(`Restored ${count} changed ${count === 1 ? 'city' : 'cities'} saved in this browser`);
@@ -1043,23 +1049,28 @@
             id,
             name: now.name,
             population: now.population,
-            geometry: { type: 'Polygon', coordinates: now.coordinates }
+            geometry: { type: 'Polygon', coordinates: wrapRings(now.coordinates, wrapOut) }
           };
         })
       };
     }
 
     function buildTopology() {
-      const features = Array.from(cities.values()).map(layer => clone(layer.feature));
+      const features = Array.from(cities.values()).map(layer => {
+        const f = clone(layer.feature);
+        f.geometry.coordinates = wrapRings(f.geometry.coordinates, wrapOut);
+        return f;
+      });
       return topojson.topology({ cities: { type: 'FeatureCollection', features } });
     }
 
     $('exportChangesBtn').addEventListener('click', () => download('metrocity_changes.json', JSON.stringify(buildChangeSet(), null, 1)));
     $('exportTopoBtn').addEventListener('click', () => download('cities_edited.topojson', JSON.stringify(buildTopology())));
 
-    // Country borders as lines, each shared border once. A border that crosses the antimeridian
-    // jumps from +180 to -180 degrees of longitude, which would draw as a line across the whole
-    // map, so lines are cut at those jumps and along the meridian itself.
+    // Country borders as lines, each shared border once. The source polygons are split along
+    // the antimeridian; those artificial edges are dropped so the two halves of Chukotka join.
+    // A border that crosses the map's own cut would draw as a line across the whole map, so
+    // lines are broken there.
     function borderLines(topo) {
       const lines = [];
       const keep = points => {
@@ -1067,8 +1078,9 @@
         const lngs = points.map(c => c[0]), lats = points.map(c => c[1]);
         lines.push({ points, w: Math.min(...lngs), e: Math.max(...lngs), s: Math.min(...lats), n: Math.max(...lats) });
       };
-      const onMeridian = c => Math.abs(Math.abs(c[0]) - 180) < 1e-6;
-      topojson.mesh(topo, topo.objects.countries).coordinates.forEach(line => {
+      const onMeridian = c => Math.abs(c[0] - 180) < 1e-6;
+      topojson.mesh(topo, topo.objects.countries).coordinates.forEach(raw => {
+        const line = raw.map(wrapIn);
         let part = [line[0]];
         for (let i = 1; i < line.length; i++) {
           const a = line[i - 1], b = line[i];
@@ -1111,8 +1123,9 @@
         if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
           throw new Error('Invalid TopoJSON (missing objects.cities)');
         }
-        // topojson-client hands neighbouring features the same point arrays; give each its own
-        data.features.forEach(f => { f.geometry.coordinates = clone(f.geometry.coordinates); });
+        // topojson-client hands neighbouring features the same point arrays; give each its own,
+        // in map longitudes
+        data.features.forEach(f => { f.geometry.coordinates = wrapRings(f.geometry.coordinates, wrapIn); });
         geojsonLayer = L.geoJSON(data, { style: styleFor, onEachFeature: onEachFeature }).addTo(map);
         restoreSaved();
         $('loading').style.display = 'none';
