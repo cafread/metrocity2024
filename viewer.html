@@ -158,7 +158,8 @@
     function devLog(level, message, extra) {
       if (!DEV) return;
       try {
-        navigator.sendBeacon('/dev/log', JSON.stringify({ time: new Date().toISOString(), level, message, ...extra }));
+        // client and page tell a person's tab from an automated test, and a stale tab from a fresh one
+        navigator.sendBeacon('/dev/log', JSON.stringify({ time: new Date().toISOString(), level, message, ...extra, client: navigator.webdriver || /Headless/.test(navigator.userAgent) ? 'automation' : 'browser', page: document.lastModified }));
       } catch (_) { /* logging must never break the page */ }
       if (level !== 'op' && level !== 'info') {
         const box = document.getElementById('devErrors');
