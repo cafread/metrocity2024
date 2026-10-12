@@ -1,6 +1,6 @@
 /**
- * Sanitize MultiPolygons by keeping only the largest polygon (by area)
- * and converting all MultiPolygons to Polygons.
+ * Sanitize MultiPolygons by keeping only the largest polygon (by area),
+ * converting all MultiPolygons to Polygons and dropping holes.
  *
  * This removes micro-polygons/islands that cause bugs in the editing system
  * while keeping the main polygon for each city.
@@ -65,13 +65,14 @@ export function sanitiseMultiPolygons(geojson: any): any {
   let multiPolygonCount = 0;
   let convertedCount = 0;
   let totalPolygonsRemoved = 0;
+  let holesRemoved = 0;
 
   const sanitized = {
     type: 'FeatureCollection',
     features: geojson.features.map((feature: any) => {
-      // Only process MultiPolygon features
       if (feature.geometry.type !== 'MultiPolygon') {
-        return feature;
+        holesRemoved += feature.geometry.coordinates.length - 1;
+        return {...feature, geometry: {type: 'Polygon', coordinates: [feature.geometry.coordinates[0]]}};
       }
 
       multiPolygonCount++;
@@ -91,9 +92,10 @@ export function sanitiseMultiPolygons(geojson: any): any {
         ...feature,
         geometry: {
           type: 'Polygon',
-          coordinates: largestPolygon
+          coordinates: [largestPolygon[0]]
         }
       };
+      holesRemoved += largestPolygon.length - 1;
 
       convertedCount++;
       totalPolygonsRemoved += (polygonCount - 1);
@@ -112,6 +114,7 @@ export function sanitiseMultiPolygons(geojson: any): any {
   console.log(`  MultiPolygons found: ${multiPolygonCount}`);
   console.log(`  MultiPolygons converted: ${convertedCount}`);
   console.log(`  Total micro-polygons removed: ${totalPolygonsRemoved}`);
+  console.log(`  Holes removed: ${holesRemoved}`);
   console.log(`  Final Polygons: ${sanitized.features.length}`);
 
   return sanitized;
