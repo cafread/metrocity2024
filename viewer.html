@@ -228,14 +228,17 @@
     // antimeridian: just west of mainland Alaska, in the Bering Strait, so Russia is in one
     // piece. No city polygon crosses this longitude. Inside the page, anything west of the cut
     // has 360 added to its longitude (wrapIn); files and exports keep -180 to 180 (wrapOut).
+    // North and south stop just past Svalbard and short of Antarctica; the cities span 55.7 S to 78.6 N.
     const CUT_LNG = -168.5;
-    const WORLD = [[-85.0511, CUT_LNG], [85.0511, CUT_LNG + 360]];
+    const SOUTH_LAT = -60;
+    const NORTH_LAT = 81;
+    const WORLD = [[SOUTH_LAT, CUT_LNG], [NORTH_LAT, CUT_LNG + 360]];
     const wrapIn = c => (c[0] < CUT_LNG ? [c[0] + 360, c[1]] : [c[0], c[1]]);
     const wrapOut = c => (c[0] > 180 ? [c[0] - 360, c[1]] : [c[0], c[1]]);
     const wrapRings = (coords, wrap) => coords.map(ring => ring.map(wrap));
     const map = L.map('map', { maxBounds: WORLD, maxBoundsViscosity: 1 });
-    // Smallest zoom at which the world is at least as wide as the map (256 px at zoom 0)
-    const fitMinZoom = () => map.setMinZoom(Math.max(0, Math.ceil(Math.log2(map.getSize().x / 256))));
+    // Smallest zoom at which that window covers the whole map, so no blank margin can show
+    const fitMinZoom = () => map.setMinZoom(map.getBoundsZoom(WORLD, true));
     fitMinZoom();
     map.on('resize', fitMinZoom);
     map.setView([startView.lat, startView.lng], Math.max(startView.zoom, map.getMinZoom()));
