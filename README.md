@@ -31,6 +31,11 @@ Run it with `deno run --allow-net --allow-read --allow-write=dev.log,dev_pushes.
 
 Against the tiles, the polygons give the same city for 99.38% of painted pixels (77.6 million). Four cities fall below 90%: Haifa, Macau and two of 10 and 13 pixels.
 
+Two scripts in `tests/` check the work:
+
+- `tests/e2e.ts` drives the editor through headless Chrome with real mouse and keyboard input (61 checks). It needs the dev server running: `deno run -A --no-lock tests/e2e.ts`
+- `tests/audit_tiles.ts` rasterises the polygons back onto the tile grid and reports the agreement figures quoted above.
+
 Known gaps:
 
 - Step 2 drops every polygon of a city except its largest: 684 small detached pieces in 232 cities.
