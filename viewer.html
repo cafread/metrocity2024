@@ -193,6 +193,7 @@
     let redoStack = [];
     let geojsonLayer = null;
     let countriesLayer = null;
+    let countryLines = [];         // country borders as [lng, lat] lines with their bounds, for snapping
     let selectedId = null;
     let editMode = false;
     let tool = 'drag';             // 'drag' | 'add' | 'delete'
@@ -223,7 +224,15 @@
       return { lat: 48.8, lng: 2.3, zoom: 6 }; // Western Europe
     }
     const startView = loadView();
-    const map = L.map('map').setView([startView.lat, startView.lng], startView.zoom);
+    // One world only: no repeated continents either side of the antimeridian, where there are
+    // no city polygons or borders to show
+    const WORLD = [[-85.0511, -180], [85.0511, 180]];
+    const map = L.map('map', { maxBounds: WORLD, maxBoundsViscosity: 1 });
+    // Smallest zoom at which the world is at least as wide as the map (256 px at zoom 0)
+    const fitMinZoom = () => map.setMinZoom(Math.max(0, Math.ceil(Math.log2(map.getSize().x / 256))));
+    fitMinZoom();
+    map.on('resize', fitMinZoom);
+    map.setView([startView.lat, startView.lng], Math.max(startView.zoom, map.getMinZoom()));
     map.on('moveend', () => {
       const c = map.getCenter();
       try { localStorage.setItem(VIEW_KEY, JSON.stringify({ lat: c.lat, lng: c.lng, zoom: map.getZoom() })); } catch (_) { /* view is a convenience */ }
@@ -231,7 +240,9 @@
 
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19
+      maxZoom: 19,
+      noWrap: true,
+      bounds: WORLD
     }).addTo(map);
 
     // Color by population
@@ -583,11 +594,9 @@
           });
         });
       } else if (snapMode === 'borders' && countriesLayer && map.hasLayer(countriesLayer)) {
-        countriesLayer.eachLayer(layer => {
-          if (!layer.getBounds || boundsMiss(layer, box)) return;
-          const geom = layer.feature.geometry;
-          const polygons = geom.type === 'Polygon' ? [geom.coordinates] : geom.type === 'MultiPolygon' ? geom.coordinates : [];
-          polygons.forEach(polygon => polygon.forEach(ring => scanRing(ring, () => ({ border: true, name: layer.feature.properties.name }), null)));
+        countryLines.forEach(line => {
+          if (line.w > box.e || line.e < box.w || line.s > box.n || line.n < box.s) return;
+          scanRing(line.points, () => ({ border: true }), null);
         });
       }
       return vertex || edge;
@@ -602,7 +611,7 @@
         snapPreview = L.circleMarker(snap.latlng, { radius: 8, fillColor: '#00ff00', fillOpacity: 0.6, color: '#ffffff', weight: 3, interactive: false, pane: 'markerPane' }).addTo(map);
       }
       snapPreview.setLatLng(snap.latlng);
-      setStatus(snap.border ? `Snap to border (${snap.name})` : `Snap to ${snap.type} (${snap.name})`);
+      setStatus(snap.border ? 'Snap to country border' : `Snap to ${snap.type} (${snap.name})`);
     }
 
     // Vertex handles for the selected city
@@ -1048,12 +1057,42 @@
     $('exportChangesBtn').addEventListener('click', () => download('metrocity_changes.json', JSON.stringify(buildChangeSet(), null, 1)));
     $('exportTopoBtn').addEventListener('click', () => download('cities_edited.topojson', JSON.stringify(buildTopology())));
 
+    // Country borders as lines, each shared border once. A border that crosses the antimeridian
+    // jumps from +180 to -180 degrees of longitude, which would draw as a line across the whole
+    // map, so lines are cut at those jumps and along the meridian itself.
+    function borderLines(topo) {
+      const lines = [];
+      const keep = points => {
+        if (points.length < 2) return;
+        const lngs = points.map(c => c[0]), lats = points.map(c => c[1]);
+        lines.push({ points, w: Math.min(...lngs), e: Math.max(...lngs), s: Math.min(...lats), n: Math.max(...lats) });
+      };
+      const onMeridian = c => Math.abs(Math.abs(c[0]) - 180) < 1e-6;
+      topojson.mesh(topo, topo.objects.countries).coordinates.forEach(line => {
+        let part = [line[0]];
+        for (let i = 1; i < line.length; i++) {
+          const a = line[i - 1], b = line[i];
+          if (Math.abs(a[0] - b[0]) > 180 || (onMeridian(a) && onMeridian(b))) {
+            keep(part);
+            part = [b];
+          } else {
+            part.push(b);
+          }
+        }
+        keep(part);
+      });
+      return lines;
+    }
+
     // Load country borders from Natural Earth
     fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json')
       .then(res => res.json())
       .then(topo => {
-        countriesLayer = L.geoJSON(topojson.feature(topo, topo.objects.countries), {
-          style: { fillColor: 'transparent', weight: 3, opacity: 0.8, color: '#333', fillOpacity: 0 },
+        countryLines = borderLines(topo);
+        countriesLayer = L.polyline(countryLines.map(line => line.points.map(c => [c[1], c[0]])), {
+          weight: 3,
+          opacity: 0.8,
+          color: '#333',
           interactive: false // Don't interfere with city clicks
         });
         if ($('showCountries').checked) countriesLayer.addTo(map);

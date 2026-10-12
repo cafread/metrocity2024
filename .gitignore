@@ -20,3 +20,4 @@ cities.geojson
 cities.topojson
 cities_europe*.topojson
 dev.log
+cities_sanitized.geojson

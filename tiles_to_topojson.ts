@@ -94,6 +94,59 @@ function stitchEdgesToRings(edges: Array<[[number, number],[number, number]]>): 
   return rings;
 }
 
+// Even-odd test of a point against a ring of axis-aligned edges, counting the vertical edges to its right
+function pointInRing(x: number, y: number, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const a = ring[i], b = ring[i + 1];
+    if (a[0] === b[0] && a[0] > x && Math.min(a[1], b[1]) < y && y < Math.max(a[1], b[1])) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Group one city's rings (global pixel coordinates) into polygons of [outer, ...holes].
+ * A ring that lies inside an odd number of the others is a hole: an enclave of another city
+ * or unpainted pixels. It belongs to the ring directly around it. A ring inside a hole is an
+ * outer ring again.
+ */
+function groupRings(rings: [number, number][][]): [number, number][][][] {
+  if (rings.length === 1) return [rings];
+  const info = rings.map((ring) => {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    // Probe with the midpoint of a vertical edge. No two rings of a city share an edge, so the
+    // probe is never on another ring's boundary.
+    let probe: [number, number] | null = null;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const a = ring[i], b = ring[i + 1];
+      if (a[0] < minX) minX = a[0];
+      if (a[0] > maxX) maxX = a[0];
+      if (a[1] < minY) minY = a[1];
+      if (a[1] > maxY) maxY = a[1];
+      if (!probe && a[0] === b[0]) probe = [a[0], (a[1] + b[1]) / 2];
+    }
+    return { minX, maxX, minY, maxY, probe: probe! };
+  });
+  const containers = rings.map((_, i) => {
+    const [x, y] = info[i].probe;
+    const around: number[] = [];
+    for (let j = 0; j < rings.length; j++) {
+      const o = info[j];
+      if (j !== i && x >= o.minX && x <= o.maxX && y >= o.minY && y <= o.maxY && pointInRing(x, y, rings[j])) around.push(j);
+    }
+    return around;
+  });
+  const polygons = new Map<number, [number, number][][]>();
+  rings.forEach((ring, i) => { if (containers[i].length % 2 === 0) polygons.set(i, [ring]); });
+  rings.forEach((ring, i) => {
+    const depth = containers[i].length;
+    if (depth % 2 === 0) return;
+    const parent = containers[i].find((j) => containers[j].length === depth - 1)!;
+    polygons.get(parent)!.push(ring);
+  });
+  return Array.from(polygons.values());
+}
+
 // Remove collinear middle points in axis-aligned rings
 function removeCollinear(ring: [number, number][]): [number, number][] {
   if (ring.length <= 4) return ring;
@@ -306,18 +359,15 @@ async function convertTilesToGeojson() {
     }
     const ringsGrid = stitchEdgesToRings(edges);
     if (ringsGrid.length === 0) { skippedCount++; continue; }
-    // Map to lon/lat
-    // FIXME: every ring becomes its own polygon, so a hole (an enclave of another city, or
-    // unpainted pixels) is written as a filled polygon instead of an interior ring.
-    const polygonsLL: number[][][] = [];
-    for (const ring of ringsGrid) {
+    // Sort rings into outers and holes, then map to lon/lat
+    const polygonsLL: number[][][][] = groupRings(ringsGrid).map((polygon) => polygon.map((ring) => {
       let coords: [number, number][] = ring.map(([vx, vy]) => globalVertexToLatLon(vx, vy));
       // ensure closed
       if (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1]) coords.push(coords[0]);
       // remove collinear points on axis-aligned segments
       coords = removeCollinear(coords);
-      polygonsLL.push(coords as unknown as number[][]);
-    }
+      return coords as unknown as number[][];
+    }));
     const city = cityById[cityId];
     if (!city) unknownMeta++;
     const feature = {
@@ -330,10 +380,10 @@ async function convertTilesToGeojson() {
       },
       geometry: polygonsLL.length === 1 ? {
         type: 'Polygon',
-        coordinates: [polygonsLL[0]]
+        coordinates: polygonsLL[0]
       } : {
         type: 'MultiPolygon',
-        coordinates: polygonsLL.map(r => [r])
+        coordinates: polygonsLL
       }
     };
     // Stream this feature to file

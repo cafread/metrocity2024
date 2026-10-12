@@ -5,9 +5,10 @@
  * This removes micro-polygons/islands that cause bugs in the editing system
  * while keeping the main polygon for each city.
  *
+ * Works on the GeoJSON, before topofy.ts, so the data is quantised and simplified only once.
+ *
  * Usage (Deno):
  *   deno run --allow-read --allow-write sanitise_multipolygons.ts cities.geojson cities_sanitized.geojson
- *   deno run --allow-read --allow-write sanitise_multipolygons.ts cities.topojson cities_sanitized.topojson
  */
 
 /**
@@ -122,8 +123,7 @@ if (import.meta.main) {
 
   if (args.length < 2) {
     console.error('Usage: deno run --allow-read --allow-write sanitise_multipolygons.ts <input> <output>');
-    console.error('Example: deno run --allow-read --allow-write sanitise_multipolygons.ts cities.geojson cities_sanitized.geojson');
-    Deno.exit(1);
+        Deno.exit(1);
   }
 
   const [inputPath, outputPath] = args;
@@ -132,42 +132,14 @@ if (import.meta.main) {
   const inputText = await Deno.readTextFile(inputPath);
   const inputData = JSON.parse(inputText);
 
-  // Detect if TopoJSON or GeoJSON
-  let geojson: any;
-  let isTopojson = false;
-
-  if (inputData.type === 'Topology' && inputData.objects) {
-    console.log('Detected TopoJSON format');
-    isTopojson = true;
-
-    // Import topojson-client for conversion
-    const { feature } = await import('npm:topojson-client@3.1.0');
-    geojson = feature(inputData, inputData.objects.cities);
-  } else if (inputData.type === 'FeatureCollection') {
-    console.log('Detected GeoJSON format');
-    geojson = inputData;
-  } else {
-    console.error('Unknown format - expected GeoJSON FeatureCollection or TopoJSON');
+  if (inputData.type !== 'FeatureCollection') {
+    console.error('Expected a GeoJSON FeatureCollection');
     Deno.exit(1);
   }
 
   // Sanitize
   console.log('Sanitizing MultiPolygons...');
-  const sanitized = sanitiseMultiPolygons(geojson);
-
-  // Convert back to TopoJSON if needed
-  let outputData: any;
-  if (isTopojson) {
-    console.log('Converting back to TopoJSON...');
-    const { topology } = await import('npm:topojson-server@3.0.1');
-    const { presimplify, simplify } = await import('npm:topojson-simplify@3.0.3');
-
-    const topo = topology({ cities: sanitized }, 100000); // quantization
-    const presimp = presimplify(topo);
-    outputData = simplify(presimp, 0.0015);
-  } else {
-    outputData = sanitized;
-  }
+  const outputData = sanitiseMultiPolygons(inputData);
 
   // Write output
   console.log(`Writing ${outputPath}...`);
