@@ -211,6 +211,7 @@
     const VIEW_KEY = 'metrocity_view';
     const USER_KEY = 'metrocity_user';
     const PLACES_URL = 'res/cities5000.txt'; // GeoNames dump: places over 5,000 people, tab separated with a header row
+    const STATE_CODES_URL = 'res/state_codes.json'; // country -> GeoNames admin1 code -> state code, built by build_state_codes.ts
     const MIN_EDIT_ZOOM = 8;       // vertex handles are hidden below this zoom
     const SNAP_VERTEX_PX = 20;     // pull radius towards another city's vertex
     const SNAP_EDGE_PX = 14;       // pull radius towards an edge or country border
@@ -935,17 +936,17 @@
     const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
     // Names follow the cities already mapped: "ASCII name, CC", or "ASCII name, (ST), CC" in the
-    // countries that always carry a state. The state codes are this project's own, so they are
-    // learned from the mapped cities (GeoNames admin1 code to state code) and never invented.
+    // countries that carry a state. The state codes are this project's own; state_codes.json
+    // holds them by GeoNames admin1 code, and a region missing from it is never given a guess.
     function loadPlaces() {
       if (places) return Promise.resolve();
       setStatus('Loading GeoNames places...');
-      return fetch(PLACES_URL)
-        .then(res => {
-          if (!res.ok) throw new Error(`${PLACES_URL}: HTTP ${res.status}`);
-          return res.text();
-        })
-        .then(text => {
+      const get = (url, read) => fetch(url).then(res => {
+        if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+        return read(res);
+      });
+      return Promise.all([get(PLACES_URL, res => res.text()), get(STATE_CODES_URL, res => res.json())])
+        .then(([text, stateCodes]) => {
           const lines = text.split('\n').map(line => line.replace(/\r$/, '').split('\t'));
           const header = lines.shift();
           const col = name => {
@@ -956,26 +957,11 @@
           const ID = col('geonameid'), NAME = col('name'), ASCII = col('asciiname'), LAT = col('latitude'), LNG = col('longitude');
           const CC = col('country code'), ADMIN1 = col('admin1 code'), POP = col('population');
           const rows = lines.filter(r => r.length > POP);
-          const rowById = new Map(rows.map(r => [Number(r[ID]), r]));
-
-          // For each country and admin1 code, the state code most mapped cities use
-          const votes = {};
-          cities.forEach((layer, id) => {
-            const row = rowById.get(id);
-            const m = layer.feature.properties.name.match(/, \(([^)]+)\), ([A-Z]{2})$/);
-            if (!row || !m || m[2] !== row[CC]) return;
-            const byAdmin = votes[row[CC]] || (votes[row[CC]] = {});
-            const byState = byAdmin[row[ADMIN1]] || (byAdmin[row[ADMIN1]] = {});
-            byState[m[1]] = (byState[m[1]] || 0) + 1;
-          });
-          const stateCode = (cc, admin1) => {
-            const byState = votes[cc][admin1];
-            return byState ? Object.keys(byState).sort((a, b) => byState[b] - byState[a])[0] : null;
-          };
 
           places = rows.map(r => {
             const id = Number(r[ID]);
-            const state = votes[r[CC]] ? stateCode(r[CC], r[ADMIN1]) : '';
+            const states = stateCodes[r[CC]];
+            const state = states ? (states[r[ADMIN1]] || null) : ''; // null: a state country, code unknown
             // A mapped city can carry a custom name (Dallas-Fort Worth); search finds it by either
             const mappedName = cities.has(id) ? cities.get(id).feature.properties.name : '';
             return {
