@@ -61,6 +61,9 @@
     #results { max-height: 220px; overflow-y: auto; }
     .result-item { padding: 6px 8px; cursor: pointer; border-bottom: 1px solid #ddd; }
     .result-item:hover { background: #e0e0e0; }
+    .result-item.blocked { color: #999; cursor: not-allowed; }
+    .result-item.blocked:hover { background: none; }
+    #placeResults { max-height: 200px; overflow-y: auto; margin-bottom: 6px; }
     #status { font-size: 12px; line-height: 15px; padding: 4px 8px; background: #f8f9fa; border-radius: 3px; color: #555; height: 30px; overflow: hidden; }
     #status.warn { background: #fff3cd; color: #856404; }
     .change-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid #eee; font-size: 12px; }
@@ -132,10 +135,11 @@
           <button id="newCityBtn">New city</button>
         </div>
         <div id="newCityForm" style="display: none; margin-top: 8px;">
-          <input type="text" id="newCityName" placeholder="Name, e.g. Springfield, (IL), US">
-          <input type="number" id="newCityPop" placeholder="Population" min="0">
+          <input type="text" id="placeSearch" placeholder="Search GeoNames places...">
+          <div id="placeResults"></div>
+          <p id="placeChosen" class="note"></p>
           <div class="row" style="margin-top: 0;">
-            <button id="drawBtn" class="primary">Draw outline</button>
+            <button id="drawBtn" class="primary" disabled>Draw outline</button>
             <button id="finishBtn" class="primary" style="display: none;">Finish</button>
             <button id="cancelDrawBtn">Cancel</button>
           </div>
@@ -205,6 +209,7 @@
     const STORAGE_KEY = 'metrocity_edits_v2';
     const VIEW_KEY = 'metrocity_view';
     const USER_KEY = 'metrocity_user';
+    const PLACES_URL = 'res/cities5000.txt'; // GeoNames dump: places over 5,000 people, tab separated with a header row
     const MIN_EDIT_ZOOM = 8;       // vertex handles are hidden below this zoom
     const SNAP_VERTEX_PX = 20;     // pull radius towards another city's vertex
     const SNAP_EDGE_PX = 14;       // pull radius towards an edge or country border
@@ -230,6 +235,9 @@
     let vertexMarkers = [];
     let drag = null;               // vertex drag in progress
     let drawing = null;            // new city outline in progress
+    let places = null;             // GeoNames places a new city can be: { id, name, pop, lat, lng, key, noState }; read on first use
+    let chosenPlace = null;        // the place picked for the next new city
+    let placeMarker = null;
     let snapPreview = null;
     let suppressClickUntil = 0;
 
@@ -350,7 +358,8 @@
       const layer = cities.get(id);
       if (!layer) return null;
       const p = layer.feature.properties;
-      return { id, name: p.name, population: p.population, coordinates: clone(layer.feature.geometry.coordinates) };
+      // lat and lon are the city's GeoNames centre, in file longitudes; they are not editable
+      return { id, name: p.name, population: p.population, lat: p.lat, lon: p.lon, coordinates: clone(layer.feature.geometry.coordinates) };
     }
 
     function capture(ids) {
@@ -371,13 +380,15 @@
       if (layer) {
         layer.feature.properties.name = snap.name;
         layer.feature.properties.population = snap.population;
+        layer.feature.properties.lat = snap.lat;
+        layer.feature.properties.lon = snap.lon;
         layer.feature.geometry.coordinates = clone(snap.coordinates);
         layer.setLatLngs(toLatLngs(snap.coordinates));
       } else {
         geojsonLayer.addData({
           type: 'Feature',
           id: id,
-          properties: { id: id, name: snap.name, population: snap.population },
+          properties: { id: id, name: snap.name, population: snap.population, lat: snap.lat, lon: snap.lon },
           geometry: { type: 'Polygon', coordinates: clone(snap.coordinates) }
         });
       }
@@ -508,6 +519,8 @@
         id,
         name: now.name,
         population: now.population,
+        lat: now.lat,
+        lon: now.lon,
         geometry: { type: 'Polygon', coordinates: wrapRings(now.coordinates, wrapOut) },
         ...extra
       };
@@ -598,12 +611,21 @@
         return;
       }
       if (!saved) return;
-      const toMap = snap => { if (snap) snap.coordinates = wrapRings(snap.coordinates, wrapIn); return snap; };
+      const toMap = (snap, id) => {
+        if (!snap) return snap;
+        snap.coordinates = wrapRings(snap.coordinates, wrapIn);
+        // Edits saved before cities carried a centre: take it from the loaded file
+        if (!('lat' in snap) && cities.has(id)) {
+          snap.lat = cities.get(id).feature.properties.lat;
+          snap.lon = cities.get(id).feature.properties.lon;
+        }
+        return snap;
+      };
       // Committed states first, then the pending edits made on top of them
       const commits = saved.committed || {};
       Object.keys(commits).forEach(key => {
         const id = Number(key);
-        const entry = { ...commits[key], file: toMap(commits[key].file), state: toMap(commits[key].state) };
+        const entry = { ...commits[key], file: toMap(commits[key].file, id), state: toMap(commits[key].state, id) };
         committed.set(id, entry);
         baseline.set(id, entry.state);
         applySnapshot(id, entry.state);
@@ -611,8 +633,9 @@
       const changes = saved.changes || {};
       Object.keys(changes).forEach(key => {
         const id = Number(key);
-        baseline.set(id, toMap(changes[key].original));
-        applySnapshot(id, toMap(changes[key].current));
+        const original = toMap(changes[key].original, id);
+        baseline.set(id, original);
+        applySnapshot(id, toMap(changes[key].current, id));
       });
       const pending = Object.keys(changes).length;
       if (pending || committed.size) setStatus(`Restored ${pending} pending and ${committed.size} committed ${pending + committed.size === 1 ? 'city' : 'cities'} saved in this browser`);
@@ -901,17 +924,141 @@
     }
 
     // Drawing a new city
+    // A new city is always a GeoNames place: the id, name and population come from the place,
+    // so a city cannot be added twice or under a mistyped name.
+    const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+    // Names follow the cities already mapped: "ASCII name, CC", or "ASCII name, (ST), CC" in the
+    // countries that always carry a state. The state codes are this project's own, so they are
+    // learned from the mapped cities (GeoNames admin1 code to state code) and never invented.
+    function loadPlaces() {
+      if (places) return Promise.resolve();
+      setStatus('Loading GeoNames places...');
+      return fetch(PLACES_URL)
+        .then(res => {
+          if (!res.ok) throw new Error(`${PLACES_URL}: HTTP ${res.status}`);
+          return res.text();
+        })
+        .then(text => {
+          const lines = text.split('\n').map(line => line.replace(/\r$/, '').split('\t'));
+          const header = lines.shift();
+          const col = name => {
+            const i = header.indexOf(name);
+            if (i < 0) throw new Error(`${PLACES_URL} has no column "${name}"`);
+            return i;
+          };
+          const ID = col('geonameid'), NAME = col('name'), ASCII = col('asciiname'), LAT = col('latitude'), LNG = col('longitude');
+          const CC = col('country code'), ADMIN1 = col('admin1 code'), POP = col('population');
+          const rows = lines.filter(r => r.length > POP);
+          const rowById = new Map(rows.map(r => [Number(r[ID]), r]));
+
+          // For each country and admin1 code, the state code most mapped cities use
+          const votes = {};
+          cities.forEach((layer, id) => {
+            const row = rowById.get(id);
+            const m = layer.feature.properties.name.match(/, \(([^)]+)\), ([A-Z]{2})$/);
+            if (!row || !m || m[2] !== row[CC]) return;
+            const byAdmin = votes[row[CC]] || (votes[row[CC]] = {});
+            const byState = byAdmin[row[ADMIN1]] || (byAdmin[row[ADMIN1]] = {});
+            byState[m[1]] = (byState[m[1]] || 0) + 1;
+          });
+          const stateCode = (cc, admin1) => {
+            const byState = votes[cc][admin1];
+            return byState ? Object.keys(byState).sort((a, b) => byState[b] - byState[a])[0] : null;
+          };
+
+          places = rows.map(r => {
+            const id = Number(r[ID]);
+            const state = votes[r[CC]] ? stateCode(r[CC], r[ADMIN1]) : '';
+            // A mapped city can carry a custom name (Dallas-Fort Worth); search finds it by either
+            const mappedName = cities.has(id) ? cities.get(id).feature.properties.name : '';
+            return {
+              id,
+              name: `${r[ASCII]}${state ? `, (${state})` : ''}, ${r[CC]}`,
+              pop: Number(r[POP]),
+              lat: Number(r[LAT]),
+              lng: Number(r[LNG]),
+              key: [r[ASCII], r[NAME], mappedName].filter(Boolean).map(fold).join('|'),
+              noState: state === null
+            };
+          }).sort((a, b) => b.pop - a.pop);
+          setStatus(`${places.length.toLocaleString()} GeoNames places loaded`);
+        });
+    }
+
+    // Why a place cannot be added as a new city, or '' when it can
+    function placeBlock(place, namesInUse) {
+      if (cities.has(place.id)) return 'on the map';
+      if (place.noState) return 'no state code';
+      if (namesInUse.has(place.name)) return 'name in use';
+      return '';
+    }
+
+    const namesOnMap = () => new Set(Array.from(cities.values(), layer => layer.feature.properties.name));
+
+    function searchPlaces() {
+      const query = fold($('placeSearch').value.trim());
+      if (!places || query.length < 2) {
+        $('placeResults').innerHTML = '';
+        return;
+      }
+      // Places are sorted by population; names starting with the query come before other matches
+      const starts = [], contains = [];
+      for (const place of places) {
+        const at = place.key.indexOf(query);
+        if (at < 0) continue;
+        if (at === 0 || place.key[at - 1] === '|') starts.push(place);
+        else if (contains.length < 12) contains.push(place);
+        if (starts.length === 12) break;
+      }
+      const names = namesOnMap();
+      $('placeResults').innerHTML = starts.concat(contains).slice(0, 12).map(place => {
+        const block = placeBlock(place, names);
+        const shown = cities.has(place.id) ? cities.get(place.id).feature.properties.name : place.name;
+        return `<div class="result-item${block ? ' blocked' : ''}" data-id="${place.id}">${esc(shown)} (pop: ${place.pop.toLocaleString()})${block ? ` <span class="tag">${block}</span>` : ''}</div>`;
+      }).join('') || '<div class="result-item blocked">No GeoNames place matches</div>';
+    }
+
+    function choosePlace(place) {
+      const block = place ? placeBlock(place, namesOnMap()) : '';
+      if (block) {
+        setStatus(`${place.name} cannot be added: ${block}`, true);
+        return;
+      }
+      chosenPlace = place;
+      if (placeMarker) { map.removeLayer(placeMarker); placeMarker = null; }
+      $('drawBtn').disabled = !place;
+      $('placeChosen').textContent = place ? `${place.name}, GeoNames ${place.id}, population ${place.pop.toLocaleString()}, centre ${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}` : '';
+      if (!place) return;
+      $('placeResults').innerHTML = '';
+      $('placeSearch').value = place.name;
+      // Show where GeoNames puts the place, as a guide for the outline
+      const at = wrapIn([place.lng, place.lat]);
+      placeMarker = L.circleMarker([at[1], at[0]], { radius: 7, color: '#1565c0', weight: 3, fillColor: '#ffffff', fillOpacity: 1, interactive: false }).addTo(map);
+      map.setView([at[1], at[0]], Math.max(map.getZoom(), 10), { animate: false });
+      setStatus(`${place.name}: press Draw outline, then click around the marker`);
+    }
+
+    function resetNewCity() {
+      choosePlace(null);
+      $('placeSearch').value = '';
+      $('placeResults').innerHTML = '';
+      $('newCityForm').style.display = 'none';
+    }
+
     function startDrawing() {
-      const name = $('newCityName').value.trim();
-      if (!name) {
-        setStatus('Give the new city a name first', true);
-        $('newCityName').focus();
+      if (!chosenPlace) {
+        setStatus('Search for the GeoNames place first', true);
+        $('placeSearch').focus();
         return;
       }
       select(null);
       drawing = {
-        name,
-        population: Math.max(0, Math.round(Number($('newCityPop').value) || 0)),
+        id: chosenPlace.id,
+        name: chosenPlace.name,
+        population: chosenPlace.pop,
+        lat: chosenPlace.lat,
+        lon: chosenPlace.lng,
         points: [],
         touched: new Map(), // neighbour id -> points to insert into its outline on finish
         line: L.polyline([], { color: '#1565c0', weight: 2, dashArray: '4 4', interactive: false }).addTo(map),
@@ -963,8 +1110,11 @@
         return;
       }
       stopDrawing();
-      // New cities get negative ids so they cannot collide with GeoNames ids
-      const id = Math.min(0, ...Array.from(cities.keys()), ...Array.from(baseline.keys())) - 1;
+      const id = d.id;
+      if (cities.has(id)) {
+        setStatus(`${d.name} is already on the map`, true);
+        return;
+      }
       const neighbours = Array.from(d.touched.keys()).filter(nid => cities.has(nid));
       const before = capture(neighbours);
       before[id] = null;
@@ -972,18 +1122,16 @@
         d.touched.get(nid).forEach(p => insertOnNearestEdge(nid, p));
         redraw(nid);
       });
-      applySnapshot(id, { id, name: d.name, population: d.population, coordinates: [ring] });
+      applySnapshot(id, { id, name: d.name, population: d.population, lat: d.lat, lon: d.lon, coordinates: [ring] });
       suppressClickUntil = Date.now() + 100;
       selectedId = id;
       record(`Add city ${d.name}`, before);
-      $('newCityForm').style.display = 'none';
-      $('newCityName').value = '';
-      $('newCityPop').value = '';
+      resetNewCity();
     }
 
     function cancelDrawing() {
       if (drawing) stopDrawing();
-      $('newCityForm').style.display = 'none';
+      resetNewCity();
       afterChange('New city cancelled');
     }
 
@@ -1032,7 +1180,8 @@
       }
       const id = selectedId;
       const props = cities.get(id).feature.properties;
-      const facts = `<strong>ID:</strong> ${id < 0 ? 'new (' + id + ')' : id}<br><strong>Vertices:</strong> ${countVertices(cities.get(id).feature)}`;
+      const centre = typeof props.lat === 'number' && typeof props.lon === 'number' ? `${props.lat.toFixed(4)}, ${props.lon.toFixed(4)}` : 'unknown';
+      const facts = `<strong>GeoNames ID:</strong> ${id}<br><strong>Centre:</strong> ${centre}<br><strong>Vertices:</strong> ${countVertices(cities.get(id).feature)}`;
       if (!editMode) {
         delete info.dataset.cityId;
         info.innerHTML = `<h3>${esc(props.name)}</h3><p><strong>Population:</strong> ${props.population.toLocaleString()}</p><p>${facts}</p>`;
@@ -1224,7 +1373,20 @@
     $('loginCancelBtn').addEventListener('click', renderUser);
     $('newCityBtn').addEventListener('click', () => {
       $('newCityForm').style.display = 'block';
-      $('newCityName').focus();
+      $('placeSearch').focus();
+      loadPlaces().then(searchPlaces).catch(err => {
+        console.error('Failed to load GeoNames places:', err);
+        setStatus('Could not load GeoNames places: ' + err.message, true);
+      });
+    });
+    $('placeSearch').addEventListener('input', () => {
+      if (chosenPlace) choosePlace(null); // typing again drops the earlier pick
+      searchPlaces();
+    });
+    $('placeResults').addEventListener('click', e => {
+      const item = e.target.closest('.result-item');
+      const place = item && item.dataset.id && places.find(p => p.id === Number(item.dataset.id));
+      if (place) choosePlace(place);
     });
     $('drawBtn').addEventListener('click', startDrawing);
     $('finishBtn').addEventListener('click', finishDrawing);

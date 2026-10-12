@@ -15,13 +15,15 @@ Work in progress to replace the PNG tiles with one TopoJSON file, so that neighb
 
 The scripts run on [Deno](https://deno.com/):
 
-1. `tiles_to_topojson.ts` traces `tiles/*.png` into `cities.geojson` (3,721 cities, about 29 MB). A ring inside another ring of the same city becomes a hole. It needs a large heap: `deno run --allow-read --allow-write --v8-flags=--max-old-space-size=16384 tiles_to_topojson.ts`
+1. `tiles_to_topojson.ts` traces `tiles/*.png` into `cities.geojson` (3,721 cities, about 29 MB), each with its id, name, population and GeoNames centre. A ring inside another ring of the same city becomes a hole. It needs a large heap: `deno run --allow-read --allow-write --v8-flags=--max-old-space-size=16384 tiles_to_topojson.ts`
 2. `sanitise_multipolygons.ts` keeps the largest polygon of each city: `deno run --allow-read --allow-write sanitise_multipolygons.ts cities.geojson cities_sanitized.geojson`
 3. `topofy.ts` quantises and simplifies that into the TopoJSON, keeping at least four vertices in every ring so tiny cities and holes survive: `deno run --allow-read --allow-write topofy.ts --in cities_sanitized.geojson --out cities_sanitized.topojson`
 
 Only `cities_sanitized.topojson` is committed; the intermediate files are ignored and can be rebuilt with the steps above.
 
-`viewer.html` is a Leaflet editor for `cities_sanitized.topojson`, as a proof of the new editing UI. In edit mode you can drag, add and delete vertices (a vertex shared with a neighbour moves in both cities), snap to neighbouring cities or country borders, rename a city, change its population, draw a new city and delete one. Every action can be undone and redone.
+`viewer.html` is a Leaflet editor for `cities_sanitized.topojson`, as a proof of the new editing UI. In edit mode you can drag, add and delete vertices (a vertex shared with a neighbour moves in both cities), snap to neighbouring cities or country borders, rename a city, change its population, add a new city and delete one. Every action can be undone and redone.
+
+A new city is picked from GeoNames, not typed: the editor reads `res/cities5000.txt`, and the place supplies the id, name, population and centre. A place already on the map cannot be added again. Names follow the mapped cities, with a state code in the countries that carry one (AU, BR, CA, CN, IN, JP, US). Those codes are learned from the mapped cities, so a place in a state that no mapped city uses is not offered until one exists.
 
 A changed city is pending until it is committed. Commit accepts its current state, after which Revert returns to that state instead of the file's; Uncommit takes a commit back. Pending and committed changes are kept in the browser's localStorage. They can be exported as a change list or as a complete new TopoJSON file, or pushed to the remote once logged in. The user defaults to `anon`; login is mocked (a name, no password) and so is the remote.
 
@@ -32,7 +34,7 @@ Against the tiles, the polygons give the same city for 99.38% of painted pixels 
 Known gaps:
 
 - Step 2 drops every polygon of a city except its largest: 684 small detached pieces in 232 cities.
-- The editor does not stop polygons from overlapping, and a new city has a provisional negative id.
+- The editor does not stop polygons from overlapping.
 - Login and the remote are mocks. A pushed change is recorded by the dev server but the served data does not change.
 
 `AGENTS_HISTORY.md` and `agent_plans.md` are the logs kept by the AI agents that wrote this, including the remaining plans.

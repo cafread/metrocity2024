@@ -376,7 +376,10 @@ async function convertTilesToGeojson() {
       properties: {
         id: cityId,
         name: city ? city.n : `City ${cityId}`,
-        population: city ? city.p : 0
+        population: city ? city.p : 0,
+        // GeoNames centre of the city
+        lat: city ? city.la : null,
+        lon: city ? city.lo : null
       },
       geometry: polygonsLL.length === 1 ? {
         type: 'Polygon',
