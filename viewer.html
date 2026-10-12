@@ -206,8 +206,11 @@
       }
     }
 
-    const DATA_URL = 'cities_sanitized.topojson';
-    const STORAGE_KEY = 'metrocity_edits_v2';
+    // ?data=<file>.topojson loads another data set from this folder, with its own saved edits
+    const dataParam = new URLSearchParams(location.search).get('data') || '';
+    const altData = /^[\w-]+\.topojson$/.test(dataParam) ? dataParam : '';
+    const DATA_URL = altData || 'cities_sanitized.topojson';
+    const STORAGE_KEY = 'metrocity_edits_v2' + (altData ? ':' + altData : '');
     const VIEW_KEY = 'metrocity_view';
     const USER_KEY = 'metrocity_user';
     const PLACES_URL = 'res/cities5000.txt'; // GeoNames dump: places over 5,000 people, tab separated with a header row
@@ -311,7 +314,7 @@
       const changed = baseline.has(id) && isDirty(id);
       const accepted = committed.has(id);
       return {
-        fillColor: getColor(feature.properties.population),
+        fillColor: feature.properties.fill || getColor(feature.properties.population),
         weight: selected ? 3 : changed || accepted ? 2 : 1,
         opacity: dimmed && !selected ? 0.8 : 1,
         color: selected ? '#1565c0' : changed ? '#e65100' : accepted ? '#2e7d32' : '#666',
@@ -1295,21 +1298,23 @@
         Avg Vertices: ${cities.size ? Math.round(totalVerts / cities.size) : 0}`;
     }
 
-    $('search').addEventListener('input', e => {
-      const query = e.target.value.toLowerCase();
-      if (query.length < 2) {
+    function renderResults(query) {
+      const small = cities.size <= 50; // a small data set is listed in full
+      if (query.length < 2 && !small) {
         $('results').innerHTML = '';
         return;
       }
       const matches = [];
       for (const layer of cities.values()) {
         if (layer.feature.properties.name.toLowerCase().includes(query)) matches.push(layer.feature.properties);
-        if (matches.length === 20) break;
+        if (matches.length === (small ? 50 : 20)) break;
       }
+      $('results').style.maxHeight = small ? '60vh' : '';
       $('results').innerHTML = matches.map(p =>
-        `<div class="result-item" data-id="${p.id}">${esc(p.name)} (pop: ${p.population.toLocaleString()})</div>`
+        `<div class="result-item" data-id="${p.id}">${esc(p.name)}${p.population ? ` (pop: ${p.population.toLocaleString()})` : ''}</div>`
       ).join('');
-    });
+    }
+    $('search').addEventListener('input', e => renderResults(e.target.value.toLowerCase()));
 
     $('results').addEventListener('click', e => {
       if (!e.target.classList.contains('result-item')) return;
@@ -1513,7 +1518,8 @@
         const restored = $('status').textContent;
         afterChange();
         if (restored) setStatus(restored);
-        devLog('info', `Loaded ${cities.size} cities`);
+        renderResults('');
+        devLog('info', `Loaded ${cities.size} cities from ${DATA_URL}`);
       })
       .catch(err => {
         console.error('Failed to load city data:', err);
