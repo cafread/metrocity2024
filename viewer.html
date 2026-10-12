@@ -46,7 +46,7 @@
       border-radius: 3px;
     }
     button:hover:not(:disabled) { background: #f0f0f0; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button:disabled, button.inactive { opacity: 0.5; cursor: not-allowed; }
     button.primary { background: #28a745; color: white; border-color: #28a745; }
     button.primary:hover:not(:disabled) { background: #218838; }
     button.danger { color: #b71c1c; border-color: #e0a0a0; }
@@ -61,14 +61,16 @@
     #results { max-height: 220px; overflow-y: auto; }
     .result-item { padding: 6px 8px; cursor: pointer; border-bottom: 1px solid #ddd; }
     .result-item:hover { background: #e0e0e0; }
-    #status { font-size: 12px; padding: 4px 8px; background: #f8f9fa; border-radius: 3px; color: #555; min-height: 15px; }
+    #status { font-size: 12px; line-height: 15px; padding: 4px 8px; background: #f8f9fa; border-radius: 3px; color: #555; height: 30px; overflow: hidden; }
     #status.warn { background: #fff3cd; color: #856404; }
-    #changeList { max-height: 180px; overflow-y: auto; margin-top: 6px; }
     .change-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid #eee; font-size: 12px; }
     .change-item .name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tag { font-size: 10px; padding: 1px 5px; border-radius: 8px; background: #ffe0b2; color: #8a4b00; }
     .tag.new { background: #c8e6c9; color: #1b5e20; }
     .tag.deleted { background: #ffcdd2; color: #b71c1c; }
+    .tag.pushed { background: #bbdefb; color: #0d47a1; }
+    .note { font-size: 11px; color: #2e7d32; margin: 0 0 6px 0; }
+    #changeList, #committedList { max-height: 150px; overflow-y: auto; margin-top: 6px; }
     #loading {
       position: absolute;
       top: 50%;
@@ -91,6 +93,20 @@
   <div id="sidebar">
     <h2 style="margin-top:0">City Editor</h2>
     <div id="devErrors" class="panel"></div>
+
+    <div class="panel">
+      <div class="row" style="margin-top: 0; align-items: center;">
+        <span style="flex: 1;">User: <strong id="userName">anon</strong></span>
+        <button id="loginBtn" class="small">Log in</button>
+      </div>
+      <div id="loginForm" style="display: none; margin-top: 6px;">
+        <input type="text" id="loginName" placeholder="User name (mock login, no password)">
+        <div class="row" style="margin-top: 0;">
+          <button id="loginOkBtn" class="primary">Log in</button>
+          <button id="loginCancelBtn">Cancel</button>
+        </div>
+      </div>
+    </div>
 
     <div class="panel">
       <label><input type="checkbox" id="showCountries" checked> Show country borders</label>
@@ -128,13 +144,23 @@
       <div id="status" style="margin-top: 8px;"></div>
     </div>
 
+    <!-- The selected city sits above the lists that grow and shrink, so its buttons stay put -->
+    <div class="panel" id="info"></div>
+
     <div class="panel" id="changesPanel" style="display: none;">
-      <h3 id="changesTitle">Changes</h3>
+      <h3 id="changesTitle">Pending changes</h3>
       <div id="changeList"></div>
-      <div class="row">
+      <div class="row" id="pendingButtons">
+        <button id="commitAllBtn" class="primary">Commit all</button>
         <button id="revertAllBtn">Revert all</button>
       </div>
+      <h3 id="committedTitle" style="margin-top: 12px;">Committed</h3>
+      <div id="committedList"></div>
       <div class="row">
+        <button id="pushBtn" class="primary" disabled>Push</button>
+      </div>
+      <div class="caption">Save locally</div>
+      <div class="row" style="margin-top: 0;">
         <button id="exportChangesBtn" title="Download the changed cities as JSON">Export changes</button>
         <button id="exportTopoBtn" title="Download every city as a new TopoJSON file">Export TopoJSON</button>
       </div>
@@ -144,7 +170,6 @@
       <input type="text" id="search" placeholder="Search cities...">
       <div id="results"></div>
     </div>
-    <div class="panel" id="info"></div>
     <div class="panel" id="stats"></div>
   </div>
 
@@ -179,6 +204,7 @@
     const DATA_URL = 'cities_sanitized.topojson';
     const STORAGE_KEY = 'metrocity_edits_v2';
     const VIEW_KEY = 'metrocity_view';
+    const USER_KEY = 'metrocity_user';
     const MIN_EDIT_ZOOM = 8;       // vertex handles are hidden below this zoom
     const SNAP_VERTEX_PX = 20;     // pull radius towards another city's vertex
     const SNAP_EDGE_PX = 14;       // pull radius towards an edge or country border
@@ -189,7 +215,9 @@
     // State. The polygons' GeoJSON coordinates are the only copy of the geometry: a vertex
     // shared by neighbouring cities is simply an identical coordinate in each of their rings.
     const cities = new Map();      // city id -> Leaflet polygon layer (layer.feature is the GeoJSON feature)
-    const originals = new Map();   // city id -> snapshot as loaded (null = did not exist); touched cities only
+    const baseline = new Map();   // city id -> snapshot its edits are measured from: as loaded, or as last committed (null = no city); touched cities only
+    const committed = new Map();   // city id -> { file, state, by, at, pushed }: the accepted snapshot and the file's snapshot it replaces
+    let user = 'anon';             // mock login: a name kept in the browser, no password
     let undoStack = [];            // operations: { label, before: {id: snapshot|null}, after: {id: snapshot|null} }
     let redoStack = [];
     let geojsonLayer = null;
@@ -214,6 +242,7 @@
 
     function setStatus(text, warn = false) {
       $('status').textContent = text;
+      $('status').title = text;
       $('status').className = warn ? 'warn' : '';
     }
 
@@ -269,12 +298,13 @@
       const id = feature.properties.id;
       const dimmed = countriesLayer && map.hasLayer(countriesLayer);
       const selected = id === selectedId;
-      const changed = originals.has(id) && isDirty(id);
+      const changed = baseline.has(id) && isDirty(id);
+      const accepted = committed.has(id);
       return {
         fillColor: getColor(feature.properties.population),
-        weight: selected ? 3 : changed ? 2 : 1,
+        weight: selected ? 3 : changed || accepted ? 2 : 1,
         opacity: dimmed && !selected ? 0.8 : 1,
-        color: selected ? '#1565c0' : changed ? '#e65100' : '#666',
+        color: selected ? '#1565c0' : changed ? '#e65100' : accepted ? '#2e7d32' : '#666',
         fillOpacity: dimmed ? 0.5 : 0.6
       };
     }
@@ -360,7 +390,7 @@
 
     // Record an edit that has already been made to the layers. `before` is capture() taken
     // before the edit. Returns false when nothing actually changed.
-    function commit(label, before) {
+    function record(label, before) {
       const op = { label, before: {}, after: {} };
       Object.keys(before).forEach(key => {
         const id = Number(key);
@@ -368,7 +398,7 @@
         if (JSON.stringify(before[key]) === JSON.stringify(after)) return;
         op.before[id] = before[key];
         op.after[id] = after;
-        if (!originals.has(id)) originals.set(id, before[key]);
+        if (!baseline.has(id)) baseline.set(id, before[key]);
       });
       if (Object.keys(op.after).length === 0) return false;
       undoStack.push(op);
@@ -406,42 +436,131 @@
     }
 
     function isDirty(id) {
-      return JSON.stringify(originals.get(id)) !== JSON.stringify(snapshot(id));
+      return JSON.stringify(baseline.get(id)) !== JSON.stringify(snapshot(id));
     }
 
     function dirtyIds() {
-      return Array.from(originals.keys()).filter(isDirty);
+      return Array.from(baseline.keys()).filter(isDirty);
     }
 
-    function changeKind(id) {
-      const before = originals.get(id);
-      const now = snapshot(id);
+    function changeKind(before, now) {
       if (!before) return 'new';
       if (!now) return 'deleted';
       const moved = JSON.stringify(before.coordinates) !== JSON.stringify(now.coordinates);
       const renamed = before.name !== now.name || before.population !== now.population;
-      return moved && renamed ? 'reshaped, renamed' : moved ? 'reshaped' : 'renamed';
+      return moved && renamed ? 'edited' : moved ? 'reshaped' : 'renamed';
     }
 
     function revertCity(id) {
-      const snap = snapshot(id) || originals.get(id);
+      const snap = snapshot(id) || baseline.get(id);
       const before = capture([id]);
-      applySnapshot(id, originals.get(id));
-      commit(`Revert ${snap.name}`, before);
+      applySnapshot(id, baseline.get(id));
+      record(`Revert ${snap.name}`, before);
     }
 
     function revertAll() {
       const ids = dirtyIds();
       if (ids.length === 0) return;
       const before = capture(ids);
-      ids.forEach(id => applySnapshot(id, originals.get(id)));
-      commit(`Revert all (${ids.length})`, before);
+      ids.forEach(id => applySnapshot(id, baseline.get(id)));
+      record(`Revert all (${ids.length})`, before);
+    }
+
+    const cityName = id => (snapshot(id) || baseline.get(id) || (committed.get(id) || {}).file || { name: 'city ' + id }).name;
+
+    // Commit accepts a city's current state: it leaves the pending list, and Revert returns to
+    // this state instead of the file's. Commits are kept in the browser until pushed.
+    function commitCity(id) {
+      if (!baseline.has(id) || !isDirty(id)) return false;
+      const file = committed.has(id) ? committed.get(id).file : baseline.get(id);
+      const state = snapshot(id);
+      if (JSON.stringify(state) === JSON.stringify(file)) committed.delete(id); // back to what the file has
+      else committed.set(id, { file, state, by: user, at: new Date().toISOString(), pushed: null });
+      baseline.set(id, state);
+      return true;
+    }
+
+    function commitCities(ids) {
+      const names = ids.map(id => [id, cityName(id)]).filter(([id]) => commitCity(id)).map(pair => pair[1]);
+      if (names.length === 0) return;
+      const label = names.length === 1 ? `Committed ${names[0]}` : `Committed ${names.length} cities`;
+      devLog('op', label, { user });
+      afterChange(label);
+    }
+
+    // Take a commit back: the city is measured from the file again, so it returns to pending
+    function uncommitCity(id) {
+      const entry = committed.get(id);
+      if (!entry) return;
+      const label = `Uncommitted ${cityName(id)}`;
+      baseline.set(id, entry.file);
+      committed.delete(id);
+      devLog('op', label, { user });
+      afterChange(label);
+    }
+
+    const unpushedIds = () => Array.from(committed.keys()).filter(id => !committed.get(id).pushed);
+
+    function changeEntry(id, file, now, extra) {
+      if (!now) return { action: 'delete', id, name: file.name, ...extra };
+      return {
+        action: file ? 'update' : 'create',
+        id,
+        name: now.name,
+        population: now.population,
+        geometry: { type: 'Polygon', coordinates: wrapRings(now.coordinates, wrapOut) },
+        ...extra
+      };
+    }
+
+    // Push sends the committed changes to the remote. The remote is mocked by dev_server.ts
+    // (POST /dev/push), which requires a logged-in user and keeps what it receives.
+    async function push() {
+      const entries = unpushedIds().map(id => [id, committed.get(id)]);
+      if (user === 'anon' || entries.length === 0) return;
+      const pushedAt = new Date().toISOString();
+      const body = {
+        user,
+        pushedAt,
+        base: DATA_URL,
+        changes: entries.map(([id, entry]) => changeEntry(id, entry.file, entry.state, { committedBy: entry.by, committedAt: entry.at }))
+      };
+      setStatus('Pushing...');
+      try {
+        const res = await fetch('/dev/push', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const reply = await res.json();
+        // A city committed again while the request was in flight stays unpushed
+        entries.forEach(([id, entry]) => { if (committed.get(id) === entry) entry.pushed = { by: user, at: pushedAt }; });
+        devLog('op', `Pushed ${reply.accepted} changes`, { user });
+        afterChange(`Pushed ${reply.accepted} ${reply.accepted === 1 ? 'change' : 'changes'} to the remote as ${user}`);
+      } catch (err) {
+        console.error('Push failed:', err);
+        setStatus('Push failed: ' + err.message, true);
+      }
+    }
+
+    function setUser(name) {
+      user = name || 'anon';
+      try {
+        if (user === 'anon') localStorage.removeItem(USER_KEY);
+        else localStorage.setItem(USER_KEY, user);
+      } catch (_) { /* the login is a convenience */ }
+      devLog('op', user === 'anon' ? 'Logged out' : `Logged in as ${user}`);
+      renderUser();
+      renderChanges();
+    }
+
+    function renderUser() {
+      $('userName').textContent = user;
+      $('loginBtn').textContent = user === 'anon' ? 'Log in' : 'Log out';
+      $('loginForm').style.display = 'none';
     }
 
     // Refresh everything derived from the city data after an edit, undo or redo
     function afterChange(message) {
       if (selectedId !== null && !cities.has(selectedId)) selectedId = null;
-      originals.forEach((_, id) => restyle(id));
+      baseline.forEach((_, id) => restyle(id));
       refreshVertexMarkers();
       showInfo();
       renderChanges();
@@ -458,10 +577,12 @@
     // state it was loaded in, so revert still works after a reload.
     function save() {
       const changes = {};
-      dirtyIds().forEach(id => { changes[id] = { original: originals.get(id), current: snapshot(id) }; });
+      dirtyIds().forEach(id => { changes[id] = { original: baseline.get(id), current: snapshot(id) }; });
+      const commits = {};
+      committed.forEach((entry, id) => { commits[id] = entry; });
       try {
-        if (Object.keys(changes).length === 0) localStorage.removeItem(STORAGE_KEY);
-        else localStorage.setItem(STORAGE_KEY, JSON.stringify({ savedAt: new Date().toISOString(), changes }));
+        if (Object.keys(changes).length === 0 && committed.size === 0) localStorage.removeItem(STORAGE_KEY);
+        else localStorage.setItem(STORAGE_KEY, JSON.stringify({ savedAt: new Date().toISOString(), changes, committed: commits }));
       } catch (err) {
         console.error('Could not save edits to localStorage:', err);
         setStatus('Could not save edits in this browser: ' + err.message, true);
@@ -476,16 +597,25 @@
         console.error('Ignoring unreadable saved edits:', err);
         return;
       }
-      if (!saved || !saved.changes) return;
-      Object.keys(saved.changes).forEach(key => {
+      if (!saved) return;
+      const toMap = snap => { if (snap) snap.coordinates = wrapRings(snap.coordinates, wrapIn); return snap; };
+      // Committed states first, then the pending edits made on top of them
+      const commits = saved.committed || {};
+      Object.keys(commits).forEach(key => {
         const id = Number(key);
-        const { original, current } = saved.changes[key];
-        [original, current].forEach(snap => { if (snap) snap.coordinates = wrapRings(snap.coordinates, wrapIn); });
-        originals.set(id, original);
-        applySnapshot(id, current);
+        const entry = { ...commits[key], file: toMap(commits[key].file), state: toMap(commits[key].state) };
+        committed.set(id, entry);
+        baseline.set(id, entry.state);
+        applySnapshot(id, entry.state);
       });
-      const count = Object.keys(saved.changes).length;
-      setStatus(`Restored ${count} changed ${count === 1 ? 'city' : 'cities'} saved in this browser`);
+      const changes = saved.changes || {};
+      Object.keys(changes).forEach(key => {
+        const id = Number(key);
+        baseline.set(id, toMap(changes[key].original));
+        applySnapshot(id, toMap(changes[key].current));
+      });
+      const pending = Object.keys(changes).length;
+      if (pending || committed.size) setStatus(`Restored ${pending} pending and ${committed.size} committed ${pending + committed.size === 1 ? 'city' : 'cities'} saved in this browser`);
     }
 
     // Geometry helpers
@@ -726,7 +856,7 @@
         return;
       }
       ids.forEach(redraw);
-      if (!commit(ids.length > 1 ? `Move vertex (${ids.length} cities)` : 'Move vertex', before)) refreshVertexMarkers();
+      if (!record(ids.length > 1 ? `Move vertex (${ids.length} cities)` : 'Move vertex', before)) refreshVertexMarkers();
     }
 
     function deleteVertex(r, i) {
@@ -741,7 +871,7 @@
       // Remove higher positions first so earlier removals do not shift later ones
       refs.sort((a, b) => b.i - a.i).forEach(ref => removeVertex(ringsOf(ref.id)[ref.r], ref.i));
       ids.forEach(redraw);
-      commit(ids.length > 1 ? `Delete vertex (${ids.length} cities)` : 'Delete vertex', before);
+      record(ids.length > 1 ? `Delete vertex (${ids.length} cities)` : 'Delete vertex', before);
     }
 
     function addVertexAt(latlng) {
@@ -767,7 +897,7 @@
       const before = capture(ids);
       targets.forEach(t => insertVertex(ringsOf(t.id)[t.r], t.i, p));
       ids.forEach(redraw);
-      commit(ids.length > 1 ? `Add vertex (${ids.length} cities)` : 'Add vertex', before);
+      record(ids.length > 1 ? `Add vertex (${ids.length} cities)` : 'Add vertex', before);
     }
 
     // Drawing a new city
@@ -834,7 +964,7 @@
       }
       stopDrawing();
       // New cities get negative ids so they cannot collide with GeoNames ids
-      const id = Math.min(0, ...Array.from(cities.keys()), ...Array.from(originals.keys())) - 1;
+      const id = Math.min(0, ...Array.from(cities.keys()), ...Array.from(baseline.keys())) - 1;
       const neighbours = Array.from(d.touched.keys()).filter(nid => cities.has(nid));
       const before = capture(neighbours);
       before[id] = null;
@@ -845,7 +975,7 @@
       applySnapshot(id, { id, name: d.name, population: d.population, coordinates: [ring] });
       suppressClickUntil = Date.now() + 100;
       selectedId = id;
-      commit(`Add city ${d.name}`, before);
+      record(`Add city ${d.name}`, before);
       $('newCityForm').style.display = 'none';
       $('newCityName').value = '';
       $('newCityPop').value = '';
@@ -896,64 +1026,122 @@
     function showInfo() {
       const info = $('info');
       if (selectedId === null || !cities.has(selectedId)) {
-        info.innerHTML = '<h3>Click a city polygon</h3><p>Or search above to find a city</p>';
+        delete info.dataset.cityId;
+        info.innerHTML = '<h3>Click a city polygon</h3><p>Or search below to find a city</p>';
         return;
       }
       const id = selectedId;
       const props = cities.get(id).feature.properties;
-      const facts = `<p><strong>ID:</strong> ${id < 0 ? 'new (' + id + ')' : id}<br><strong>Vertices:</strong> ${countVertices(cities.get(id).feature)}</p>`;
+      const facts = `<strong>ID:</strong> ${id < 0 ? 'new (' + id + ')' : id}<br><strong>Vertices:</strong> ${countVertices(cities.get(id).feature)}`;
       if (!editMode) {
-        info.innerHTML = `<h3>${esc(props.name)}</h3><p><strong>Population:</strong> ${props.population.toLocaleString()}</p>${facts}`;
+        delete info.dataset.cityId;
+        info.innerHTML = `<h3>${esc(props.name)}</h3><p><strong>Population:</strong> ${props.population.toLocaleString()}</p><p>${facts}</p>`;
         return;
       }
-      info.innerHTML = `
-        <div class="caption" style="margin-top: 0;">Name</div>
-        <input type="text" id="cityName" value="${esc(props.name)}">
-        <div class="caption">Population</div>
-        <input type="number" id="cityPop" min="0" value="${props.population}">
-        ${facts}
-        <div class="row">
-          <button id="revertCityBtn" ${originals.has(id) && isDirty(id) ? '' : 'disabled'}>Revert city</button>
-          <button id="deleteCityBtn" class="danger">Delete city</button>
-        </div>`;
-      const applyDetails = () => {
-        const name = $('cityName').value.trim() || props.name;
-        const population = Math.max(0, Math.round(Number($('cityPop').value) || 0));
-        if (name === props.name && population === props.population) return;
+      // Build the form once per city and update it in place afterwards. Rebuilding it while a
+      // field is being left would swallow the click on Commit that follows a rename.
+      if (info.dataset.cityId !== String(id)) {
+        info.dataset.cityId = String(id);
+        info.innerHTML = `
+          <div class="caption" style="margin-top: 0;">Name</div>
+          <input type="text" id="cityName">
+          <div class="caption">Population</div>
+          <input type="number" id="cityPop" min="0">
+          <p id="cityFacts"></p>
+          <p id="committedNote" class="note"></p>
+          <div class="row">
+            <button id="commitCityBtn" class="primary">Commit</button>
+            <button id="revertCityBtn">Revert city</button>
+          </div>
+          <div class="row">
+            <button id="deleteCityBtn" class="danger">Delete city</button>
+          </div>`;
+        $('cityName').addEventListener('change', applyDetails);
+        $('cityPop').addEventListener('change', applyDetails);
+        // Typing counts as a change straight away, so Commit can be clicked from the field
+        const typed = () => $('commitCityBtn').classList.remove('inactive');
+        $('cityName').addEventListener('input', typed);
+        $('cityPop').addEventListener('input', typed);
+        $('commitCityBtn').addEventListener('click', () => {
+          applyDetails();
+          commitCities([selectedId]);
+        });
+        $('revertCityBtn').addEventListener('click', () => revertCity(selectedId));
+        $('deleteCityBtn').addEventListener('click', () => {
+          const target = selectedId;
+          const before = capture([target]);
+          const name = cityName(target);
+          applySnapshot(target, null);
+          record(`Delete city ${name}`, before);
+        });
+      }
+      if (document.activeElement !== $('cityName')) $('cityName').value = props.name;
+      if (document.activeElement !== $('cityPop')) $('cityPop').value = props.population;
+      $('cityFacts').innerHTML = facts;
+      const dirty = baseline.has(id) && isDirty(id);
+      const entry = committed.get(id);
+      $('committedNote').textContent = entry ? `Committed by ${entry.by}, ${entry.pushed ? 'pushed by ' + entry.pushed.by : 'not pushed'}` : '';
+      // Not the disabled attribute: a browser drops the click on a button that was disabled at
+      // mouse-down, which is the moment a rename is still being applied
+      $('commitCityBtn').classList.toggle('inactive', !dirty);
+      $('revertCityBtn').disabled = !dirty;
+    }
+
+    function applyDetails() {
+      const id = selectedId;
+      if (id === null || !cities.has(id)) return;
+      const props = cities.get(id).feature.properties;
+      const name = $('cityName').value.trim() || props.name;
+      const population = Math.max(0, Math.round(Number($('cityPop').value) || 0));
+      if (name !== props.name || population !== props.population) {
         const before = capture([id]);
         const label = name !== props.name ? `Rename ${props.name} to ${name}` : `Set population of ${props.name}`;
         props.name = name;
         props.population = population;
-        commit(label, before);
-      };
-      $('cityName').addEventListener('change', applyDetails);
-      $('cityPop').addEventListener('change', applyDetails);
-      $('revertCityBtn').addEventListener('click', () => revertCity(id));
-      $('deleteCityBtn').addEventListener('click', () => {
-        const before = capture([id]);
-        applySnapshot(id, null);
-        commit(`Delete city ${props.name}`, before);
-      });
+        record(label, before);
+      }
+      $('cityName').value = props.name;
+      $('cityPop').value = props.population;
+    }
+
+    function listItem(id, name, kind, actions, title) {
+      const tagClass = ['new', 'deleted', 'pushed'].includes(kind) ? kind : '';
+      const buttons = actions.map(a => `<button class="small" data-act="${a.toLowerCase()}">${a}</button>`).join('');
+      return `<div class="change-item" data-id="${id}"><span class="name" title="${esc(title || name)}">${esc(name)}</span><span class="tag ${tagClass}">${kind}</span>${buttons}</div>`;
     }
 
     function renderChanges() {
-      const ids = dirtyIds();
-      $('changesPanel').style.display = ids.length ? 'block' : 'none';
-      $('changesTitle').textContent = `Changes (${ids.length})`;
-      $('changeList').innerHTML = ids.map(id => {
-        const snap = snapshot(id) || originals.get(id);
-        const kind = changeKind(id);
-        return `<div class="change-item" data-id="${id}"><span class="name" title="${esc(snap.name)}">${esc(snap.name)}</span><span class="tag ${kind}">${kind}</span><button class="small" title="Revert this city">Revert</button></div>`;
-      }).join('');
+      const pending = dirtyIds();
+      const unpushed = unpushedIds();
+      $('changesPanel').style.display = pending.length || committed.size ? 'block' : 'none';
+      $('changesTitle').textContent = `Pending changes (${pending.length})`;
+      $('pendingButtons').style.display = pending.length ? 'flex' : 'none';
+      $('changeList').innerHTML = pending.map(id => listItem(id, cityName(id), changeKind(baseline.get(id), snapshot(id)), ['Commit', 'Revert'])).join('');
+      $('committedTitle').textContent = `Committed (${committed.size})`;
+      $('committedList').innerHTML = Array.from(committed, ([id, entry]) => listItem(
+        id,
+        (entry.state || entry.file).name,
+        entry.pushed ? 'pushed' : changeKind(entry.file, entry.state),
+        ['Uncommit'],
+        `Committed by ${entry.by} at ${entry.at}` + (entry.pushed ? `, pushed by ${entry.pushed.by} at ${entry.pushed.at}` : '')
+      )).join('');
+      $('pushBtn').textContent = unpushed.length ? `Push (${unpushed.length})` : 'Push';
+      $('pushBtn').disabled = user === 'anon' || unpushed.length === 0;
+      $('pushBtn').title = user === 'anon' ? 'Log in to push committed changes to the remote' : 'Send committed changes to the remote';
     }
 
-    $('changeList').addEventListener('click', e => {
+    function onChangeListClick(e) {
       const item = e.target.closest('.change-item');
       if (!item) return;
       const id = Number(item.dataset.id);
-      if (e.target.tagName === 'BUTTON') revertCity(id);
+      const act = e.target.dataset.act;
+      if (act === 'commit') commitCities([id]);
+      else if (act === 'revert') revertCity(id);
+      else if (act === 'uncommit') uncommitCity(id);
       else if (cities.has(id)) { select(id); map.fitBounds(cities.get(id).getBounds()); }
-    });
+    }
+    $('changeList').addEventListener('click', onChangeListClick);
+    $('committedList').addEventListener('click', onChangeListClick);
 
     function renderStats() {
       let totalPop = 0, totalVerts = 0;
@@ -1019,6 +1207,21 @@
     $('undoBtn').addEventListener('click', undo);
     $('redoBtn').addEventListener('click', redo);
     $('revertAllBtn').addEventListener('click', revertAll);
+    $('commitAllBtn').addEventListener('click', () => commitCities(dirtyIds()));
+    $('pushBtn').addEventListener('click', push);
+    $('loginBtn').addEventListener('click', () => {
+      if (user !== 'anon') { setUser('anon'); return; }
+      $('loginForm').style.display = 'block';
+      $('loginName').focus();
+    });
+    const submitLogin = () => {
+      const name = $('loginName').value.trim();
+      if (name && name !== 'anon') setUser(name);
+      $('loginName').value = '';
+    };
+    $('loginOkBtn').addEventListener('click', submitLogin);
+    $('loginName').addEventListener('keydown', e => { if (e.key === 'Enter') submitLogin(); });
+    $('loginCancelBtn').addEventListener('click', renderUser);
     $('newCityBtn').addEventListener('click', () => {
       $('newCityForm').style.display = 'block';
       $('newCityName').focus();
@@ -1038,24 +1241,21 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
 
+    // Every city that differs from the file, committed or still pending
     function buildChangeSet() {
+      const ids = Array.from(new Set([...committed.keys(), ...dirtyIds()]));
       return {
         format: 'metrocity-changes',
         version: 1,
         base: DATA_URL,
         exportedAt: new Date().toISOString(),
-        changes: dirtyIds().map(id => {
-          const before = originals.get(id);
+        user,
+        changes: ids.map(id => {
+          const file = committed.has(id) ? committed.get(id).file : baseline.get(id);
           const now = snapshot(id);
-          if (!now) return { action: 'delete', id, name: before.name };
-          return {
-            action: before ? 'update' : 'create',
-            id,
-            name: now.name,
-            population: now.population,
-            geometry: { type: 'Polygon', coordinates: wrapRings(now.coordinates, wrapOut) }
-          };
-        })
+          if (JSON.stringify(file) === JSON.stringify(now)) return null;
+          return changeEntry(id, file, now, { status: isDirty(id) ? 'pending' : 'committed' });
+        }).filter(Boolean)
       };
     }
 
@@ -1143,6 +1343,8 @@
         $('loading').textContent = 'Error loading data: ' + err.message;
       });
 
+    try { user = localStorage.getItem(USER_KEY) || 'anon'; } catch (_) { /* stay anon */ }
+    renderUser();
     showInfo();
   </script>
 </body>

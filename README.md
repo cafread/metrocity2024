@@ -21,9 +21,11 @@ The scripts run on [Deno](https://deno.com/):
 
 Only `cities_sanitized.topojson` is committed; the intermediate files are ignored and can be rebuilt with the steps above.
 
-`viewer.html` is a Leaflet editor for `cities_sanitized.topojson`, as a proof of the new editing UI. In edit mode you can drag, add and delete vertices (a vertex shared with a neighbour moves in both cities), snap to neighbouring cities or country borders, rename a city, change its population, draw a new city and delete one. Every action can be undone and redone, each changed city can be reverted on its own, and Revert all restores the loaded data. Changes are kept in the browser's localStorage and can be exported as a change list or as a complete new TopoJSON file.
+`viewer.html` is a Leaflet editor for `cities_sanitized.topojson`, as a proof of the new editing UI. In edit mode you can drag, add and delete vertices (a vertex shared with a neighbour moves in both cities), snap to neighbouring cities or country borders, rename a city, change its population, draw a new city and delete one. Every action can be undone and redone.
 
-Run it with `deno run --allow-net --allow-read --allow-write=dev.log dev_server.ts` and open http://localhost:4507. When the page is served from localhost it runs in development mode: uncaught errors, console warnings and each edit action are shown in the sidebar and appended to `dev.log`.
+A changed city is pending until it is committed. Commit accepts its current state, after which Revert returns to that state instead of the file's; Uncommit takes a commit back. Pending and committed changes are kept in the browser's localStorage. They can be exported as a change list or as a complete new TopoJSON file, or pushed to the remote once logged in. The user defaults to `anon`; login is mocked (a name, no password) and so is the remote.
+
+Run it with `deno run --allow-net --allow-read --allow-write=dev.log,dev_pushes.jsonl dev_server.ts` and open http://localhost:4507. When the page is served from localhost it runs in development mode: uncaught errors and console warnings are shown in the sidebar, and they and each edit action are appended to `dev.log`. The same server is the mock remote: it refuses a push from `anon` and appends an accepted one to `dev_pushes.jsonl` without applying it to the data.
 
 Against the tiles, the polygons give the same city for 99.38% of painted pixels (77.6 million). Four cities fall below 90%: Haifa, Macau and two of 10 and 13 pixels.
 
@@ -31,6 +33,6 @@ Known gaps:
 
 - Step 2 drops every polygon of a city except its largest: 684 small detached pieces in 232 cities.
 - The editor does not stop polygons from overlapping, and a new city has a provisional negative id.
-- Nothing is sent to a server yet; saving goes through the export buttons.
+- Login and the remote are mocks. A pushed change is recorded by the dev server but the served data does not change.
 
 `AGENTS_HISTORY.md` and `agent_plans.md` are the logs kept by the AI agents that wrote this, including the remaining plans.
